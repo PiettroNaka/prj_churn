@@ -1,0 +1,24 @@
+# Valida o entregável do Encontro 3 sem depender de Docker na máquina do aluno:
+# o runner do GitHub tem Docker, então o build e os testes rodam no container aqui.
+name: docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build da imagem
+        run: docker build -t churn:0.1 .
+
+      - name: Testes dentro do container
+        # tests/ não entra na imagem (só src/); entra por volume, como os dados
+        run: docker run --rm -v "$PWD/tests:/app/tests" churn:0.1 uv run pytest -q
+
+      - name: Tamanho da imagem
+        run: docker images churn:0.1 --format "{{.Repository}}:{{.Tag}} {{.Size}}"

@@ -35,6 +35,23 @@ python -m churn.model
 pytest
 ```
 
+## Rodar no container (Encontro 3)
+
+O `pyproject.toml` + `uv.lock` travam os pacotes Python; o container trava o resto
+(interpretador, SO, libs de sistema). Dados e artefatos entram por volume — não
+viram camada da imagem.
+
+```bash
+docker build -t churn:0.1 .
+docker run -v "$PWD/data:/app/data" -v "$PWD/artifacts:/app/artifacts" churn:0.1
+```
+
+Ou, sem decorar flags:
+
+```bash
+docker compose up
+```
+
 ## O que mudou em relação ao `train_churn.py`
 
 | Script monolítico | Projeto modular |
@@ -49,6 +66,6 @@ pytest
 
 ## Próximos encontros
 
+- **Enc. 3** ✓ — containerizado: `Dockerfile`, `.dockerignore` e `compose.yml`.
 - **Enc. 5** — versionar `data/` com DVC.
 - **Enc. 6** — rastrear experimentos com MLflow.
-- **Enc. 3** — este projeto já roda containerizado (Dockerfile com uv).
