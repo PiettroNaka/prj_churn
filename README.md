@@ -15,7 +15,7 @@ prj_churn/
 │  ├─ model.py       # treino (entrypoint)
 │  └─ evaluate.py    # métricas
 ├─ tests/            # pytest
-├─ data/             # dataset (versionado por DVC a partir do Enc. 5)
+├─ data/             # dataset (no Git até o Enc. 5, depois DVC)
 └─ pyproject.toml    # deps travadas (uv)
 ```
 

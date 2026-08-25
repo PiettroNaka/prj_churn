@@ -1,0 +1,5 @@
+# O dataset é artefato: os bytes têm de ser idênticos em qualquer plataforma.
+# Sem isto o Git converte LF<->CRLF no checkout e o arquivo passa a ter hash
+# diferente entre Windows e Linux — exatamente o tipo de "na minha máquina"
+# que o curso ataca, e que quebraria o rastreamento do DVC no Encontro 5.
+data/*.csv -text
