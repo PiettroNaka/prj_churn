@@ -3,6 +3,14 @@ __pycache__/
 *.pyc
 artifacts/
 .env
-# dados: versionados por DVC a partir do Encontro 5
-/data/*.csv
 .pytest_cache/
+
+# dados: versionados no Git ATÉ o DVC entrar, no Encontro 5.
+#
+# São 981 KB — cabem no Git sem incomodar. Mantê-los fora custava caro em dois
+# lugares: quem clona o repositório não conseguia reproduzir o treino, e o CI
+# não conseguia rodar o treino dentro do container (checkpoint do Encontro 3).
+#
+# Quando `dvc add data/churn.csv` rodar, o próprio DVC recoloca o ignore aqui
+# e substitui o arquivo por data/churn.csv.dvc. Ou seja: isto não é um beco sem
+# saída, é o estado normal de "antes do DVC".
