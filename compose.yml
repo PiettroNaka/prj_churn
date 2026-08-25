@@ -1,0 +1,11 @@
+# docker compose up  →  substitui a linha gigante de flags do docker run.
+# No Bloco 3 o Airflow inteiro sobe por um arquivo assim.
+services:
+  treino:
+    build: .
+    volumes:
+      # bind mounts: edita no host, roda dentro do container, sem rebuild
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+    command: uv run python -m churn.model

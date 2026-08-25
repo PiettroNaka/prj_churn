@@ -1,0 +1,12 @@
+# Contexto de build enxuto — imagem gigante é o atrito nº3 do Encontro 3.
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# dados e artefatos entram por volume, nunca pelo build
+data/
+artifacts/
+
+.env
