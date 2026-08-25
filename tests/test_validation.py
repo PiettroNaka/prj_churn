@@ -1,0 +1,197 @@
+"""Testes do Encontro 4: quebrar de propósito e ver a validação pegar.
+
+Cada teste parte de um frame que o schema aprova e suja **uma** coisa. Se algum
+destes passar a não levantar, a validação regrediu e um dado ruim voltou a ter
+caminho livre até o treino.
+"""
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from churn.validation import (
+    DataValidationError,
+    validate_clean,
+    validate_raw,
+)
+
+DATASET = Path("data/churn.csv")
+
+
+# --------------------------------------------------------------------------
+# a linha de base tem de passar — sem isso, os testes de falha não provam nada
+# --------------------------------------------------------------------------
+
+
+def test_amostra_valida_passa_no_schema_cru(raw_frame):
+    assert validate_raw(raw_frame) is not None
+
+
+def test_amostra_valida_passa_no_schema_limpo(clean_frame):
+    assert validate_clean(clean_frame) is not None
+
+
+# --------------------------------------------------------------------------
+# schema: colunas
+# --------------------------------------------------------------------------
+
+
+def test_coluna_faltando(raw_frame):
+    with pytest.raises(DataValidationError):
+        validate_raw(raw_frame.drop(columns=["Contract"]))
+
+
+def test_coluna_extra_inesperada(raw_frame):
+    sujo = raw_frame.assign(coluna_intrusa=1)
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+def test_identificador_duplicado(raw_frame):
+    sujo = raw_frame.copy()
+    sujo.loc[1, "customerID"] = sujo.loc[0, "customerID"]
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+# --------------------------------------------------------------------------
+# schema: categorias
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("coluna", "valor"),
+    [
+        ("gender", "F"),
+        ("Contract", "Mensal"),
+        ("PaymentMethod", "Pix"),
+        ("InternetService", "5G"),
+        ("Churn", "Sim"),
+        ("OnlineSecurity", "Talvez"),
+    ],
+)
+def test_categoria_fora_do_dominio(raw_frame, coluna, valor):
+    sujo = raw_frame.copy()
+    sujo.loc[0, coluna] = valor
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+def test_alvo_nulo(raw_frame):
+    sujo = raw_frame.copy()
+    sujo.loc[2, "Churn"] = None
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+# --------------------------------------------------------------------------
+# schema: faixas numéricas
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("valor", [-1, 73, 999])
+def test_tenure_fora_da_faixa(raw_frame, valor):
+    sujo = raw_frame.copy()
+    sujo.loc[0, "tenure"] = valor
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+@pytest.mark.parametrize("valor", [0.0, -10.0])
+def test_mensalidade_nao_positiva(raw_frame, valor):
+    sujo = raw_frame.copy()
+    sujo.loc[0, "MonthlyCharges"] = valor
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+def test_senior_citizen_fora_do_binario(raw_frame):
+    sujo = raw_frame.copy()
+    sujo.loc[0, "SeniorCitizen"] = 2
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+# --------------------------------------------------------------------------
+# a regra que substitui o descarte das 11 linhas
+# --------------------------------------------------------------------------
+
+
+def test_total_em_branco_e_aceito_quando_o_cliente_e_novo(raw_frame):
+    """tenure == 0 com TotalCharges em branco é semântica, não sujeira."""
+    assert raw_frame.loc[1, "tenure"] == 0
+    assert raw_frame.loc[1, "TotalCharges"].strip() == ""
+    assert validate_raw(raw_frame) is not None
+
+
+def test_total_em_branco_e_rejeitado_quando_o_cliente_e_antigo(raw_frame):
+    """O mesmo branco em quem já pagou 12 meses é corrupção — tem de falhar."""
+    sujo = raw_frame.copy()
+    sujo.loc[0, "TotalCharges"] = " "
+    assert sujo.loc[0, "tenure"] > 0
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+def test_total_zerado_em_cliente_antigo(clean_frame):
+    sujo = clean_frame.copy()
+    sujo.loc[0, "TotalCharges"] = 0.0
+    with pytest.raises(DataValidationError):
+        validate_clean(sujo)
+
+
+def test_total_com_texto_lixo(raw_frame):
+    sujo = raw_frame.copy()
+    sujo.loc[0, "TotalCharges"] = "seiscentos"
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+def test_total_negativo(clean_frame):
+    sujo = clean_frame.copy()
+    sujo.loc[0, "TotalCharges"] = -1.0
+    with pytest.raises(DataValidationError):
+        validate_clean(sujo)
+
+
+def test_total_menor_que_uma_mensalidade(clean_frame):
+    """Pega colunas invertidas e valores truncados, que passam por faixa isolada."""
+    sujo = clean_frame.copy()
+    sujo.loc[0, "TotalCharges"] = sujo.loc[0, "MonthlyCharges"] - 1
+    with pytest.raises(DataValidationError):
+        validate_clean(sujo)
+
+
+# --------------------------------------------------------------------------
+# coerência entre colunas
+# --------------------------------------------------------------------------
+
+
+def test_add_on_de_internet_sem_internet_contratada(raw_frame):
+    sujo = raw_frame.copy()
+    assert sujo.loc[2, "InternetService"] == "No"
+    sujo.loc[2, "StreamingTV"] = "Yes"
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+def test_multiplas_linhas_sem_telefone(raw_frame):
+    sujo = raw_frame.copy()
+    assert sujo.loc[1, "PhoneService"] == "No"
+    sujo.loc[1, "MultipleLines"] = "Yes"
+    with pytest.raises(DataValidationError):
+        validate_raw(sujo)
+
+
+# --------------------------------------------------------------------------
+# o dataset real (pulado quando o CSV não está presente — ele não vai no Git)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not DATASET.exists(), reason="data/churn.csv não versionado")
+def test_dataset_real_passa_nos_dois_schemas():
+    from churn.data import coerce_total_charges, drop_identifier
+
+    cru = pd.read_csv(DATASET)
+    validate_raw(cru)
+    validate_clean(coerce_total_charges(drop_identifier(cru, "customerID")))

@@ -22,3 +22,25 @@ jobs:
 
       - name: Tamanho da imagem
         run: docker images churn:0.1 --format "{{.Repository}}:{{.Tag}} {{.Size}}"
+
+      # O checkpoint do Encontro 3 é o treino rodando DENTRO do container, com o
+      # dataset entrando por volume. data/churn.csv não é versionado (DVC vem no
+      # Encontro 5), então este passo só roda quando o CSV está presente no
+      # checkout — numa branch de verificação, ou depois que o DVC entrar.
+      - name: Treino no container (dados via volume)
+        if: hashFiles('data/churn.csv') != ''
+        run: |
+          mkdir -p artifacts
+          docker run --rm \
+            -v "$PWD/data:/app/data" \
+            -v "$PWD/artifacts:/app/artifacts" \
+            churn:0.1
+          echo "--- artefato gerado no host, via volume ---"
+          ls -lh artifacts/
+
+      - name: Publica o modelo treinado
+        if: hashFiles('data/churn.csv') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: churn-model
+          path: artifacts/churn_model.pkl

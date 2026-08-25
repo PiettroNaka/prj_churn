@@ -7,7 +7,7 @@ def raw_frame() -> pd.DataFrame:
     """Mini-amostra com o schema do Telco, incluindo um TotalCharges em branco."""
     return pd.DataFrame(
         {
-            "customerID": ["A1", "A2", "A3", "A4"],
+            "customerID": ["7590-VHVE", "5575-GNVD", "3668-QPYB", "7795-CFOC"],
             "gender": ["Male", "Female", "Female", "Male"],
             "SeniorCitizen": [0, 1, 0, 0],
             "Partner": ["Yes", "No", "No", "Yes"],
@@ -30,3 +30,15 @@ def raw_frame() -> pd.DataFrame:
             "Churn": ["No", "Yes", "No", "Yes"],
         }
     )
+
+
+@pytest.fixture
+def clean_frame(raw_frame) -> pd.DataFrame:
+    """A mesma amostra, já passada por drop_identifier + coerce_total_charges.
+
+    É a linha de base dos testes do Encontro 4: parte de um frame que o schema
+    aprova, e cada teste suja UMA coisa para ver a validação pegar.
+    """
+    from churn.data import coerce_total_charges, drop_identifier
+
+    return coerce_total_charges(drop_identifier(raw_frame, "customerID"))
