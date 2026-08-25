@@ -1,8 +1,12 @@
 """Carga, limpeza e validação dos dados.
 
 Funções puras (recebem/retornam DataFrame, sem efeito colateral) compostas por
-uma orquestração fina em ``load_clean``. A validação aqui é intencionalmente
-simples: no Encontro 4 ela é substituída por Great Expectations / pandera.
+uma orquestração fina em ``load_clean``.
+
+A validação escrita à mão do Encontro 2 foi substituída, no Encontro 4, pelos
+schemas declarativos do pandera em :mod:`churn.validation`. O pipeline agora é
+validado **duas vezes**: no dado cru, antes de qualquer transformação, e no dado
+já limpo, antes de virar feature.
 """
 from __future__ import annotations
 
@@ -10,14 +14,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from churn.validation import RAW_SCHEMA, validate_clean, validate_raw
+
 # Schema esperado do dataset Telco Customer Churn.
-EXPECTED_COLUMNS: frozenset[str] = frozenset({
-    "customerID", "gender", "SeniorCitizen", "Partner", "Dependents", "tenure",
-    "PhoneService", "MultipleLines", "InternetService", "OnlineSecurity",
-    "OnlineBackup", "DeviceProtection", "TechSupport", "StreamingTV",
-    "StreamingMovies", "Contract", "PaperlessBilling", "PaymentMethod",
-    "MonthlyCharges", "TotalCharges", "Churn",
-})
+# Derivado do RAW_SCHEMA para não existirem duas listas de colunas divergindo.
+EXPECTED_COLUMNS: frozenset[str] = frozenset(RAW_SCHEMA.columns)
 
 
 def load_raw(path: Path) -> pd.DataFrame:
@@ -26,13 +27,16 @@ def load_raw(path: Path) -> pd.DataFrame:
 
 
 def validate(df: pd.DataFrame, target: str) -> pd.DataFrame:
-    """Valida presença de colunas e integridade do alvo. Levanta ValueError."""
-    missing = EXPECTED_COLUMNS - set(df.columns)
-    if missing:
-        raise ValueError(f"Colunas ausentes no dataset: {sorted(missing)}")
-    if df[target].isna().any():
-        raise ValueError(f"Há valores nulos na coluna alvo '{target}'.")
-    return df
+    """Valida o dado cru contra o ``RAW_SCHEMA``. Levanta ValueError.
+
+    ``target`` é conferido contra o schema: se a configuração apontar para uma
+    coluna-alvo que o contrato não declara, isso é erro de config, não de dado.
+    """
+    if target not in RAW_SCHEMA.columns:
+        raise ValueError(
+            f"Alvo '{target}' não é uma coluna declarada no schema do dataset."
+        )
+    return validate_raw(df)
 
 
 def drop_identifier(df: pd.DataFrame, id_column: str) -> pd.DataFrame:
@@ -44,7 +48,8 @@ def coerce_total_charges(df: pd.DataFrame) -> pd.DataFrame:
     """Converte TotalCharges (texto, com brancos) em número.
 
     Os brancos correspondem a clientes com ``tenure == 0`` (novos), cujo total
-    gasto é, de fato, 0 — não um número mágico como no script original.
+    gasto é, de fato, 0 — não um número mágico como no script original. O
+    ``CLEAN_SCHEMA`` exige essa relação: zero só é aceito com ``tenure == 0``.
     """
     out = df.copy()
     out["TotalCharges"] = pd.to_numeric(out["TotalCharges"], errors="coerce").fillna(0.0)
@@ -52,9 +57,9 @@ def coerce_total_charges(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_clean(data_path: Path, id_column: str, target: str) -> pd.DataFrame:
-    """Pipeline de dados: carrega -> valida -> remove id -> coage TotalCharges."""
+    """Pipeline de dados: carrega -> valida cru -> remove id -> coage -> valida limpo."""
     df = load_raw(data_path)
     df = validate(df, target)
     df = drop_identifier(df, id_column)
     df = coerce_total_charges(df)
-    return df
+    return validate_clean(df)
