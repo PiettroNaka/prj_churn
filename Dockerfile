@@ -18,5 +18,7 @@ COPY src/ ./src/
 RUN uv sync --frozen
 
 # Dados e artefatos NÃO entram na imagem: vêm por volume (ver compose.yml).
-# É o mesmo princípio do .gitignore — dado é artefato à parte, DVC no Encontro 5.
+# É o mesmo princípio do DVC (Encontro 5): dado é artefato à parte, rastreado por
+# ponteiro. A imagem fica com o código; o CSV chega montado, já materializado no
+# host por `dvc pull` ou por ./scripts/fetch_data.sh.
 CMD ["uv", "run", "python", "-m", "churn.model"]

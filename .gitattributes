@@ -1,5 +1,10 @@
 # O dataset é artefato: os bytes têm de ser idênticos em qualquer plataforma.
 # Sem isto o Git converte LF<->CRLF no checkout e o arquivo passa a ter hash
 # diferente entre Windows e Linux — exatamente o tipo de "na minha máquina"
-# que o curso ataca, e que quebraria o rastreamento do DVC no Encontro 5.
+# que o curso ataca.
+#
+# Desde o Encontro 5 quem guarda o CSV é o DVC, não o Git, então a regra deixou
+# de estar no caminho crítico. Fica por dois motivos: o histórico anterior ao
+# DVC continua conferindo byte a byte (é dele que scripts/fetch_data.sh recupera
+# o arquivo), e qualquer CSV que volte para o Git já nasce protegido.
 data/*.csv -text

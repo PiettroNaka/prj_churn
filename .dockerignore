@@ -9,4 +9,8 @@ __pycache__/
 data/
 artifacts/
 
+# metadados e cache do DVC: o container recebe o dado pronto, por volume
+.dvc/
+*.dvc
+
 .env

@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # O CSV saiu do Git no Encontro 5 (DVC). Sem remote acessível aqui,
+          # scripts/fetch_data.sh recupera os bytes do blob anterior ao DVC —
+          # e blob antigo exige histórico completo, não o clone raso padrão.
+          fetch-depth: 0
 
       - name: Build da imagem
         run: docker build -t churn:0.1 .
@@ -23,12 +28,15 @@ jobs:
       - name: Tamanho da imagem
         run: docker images churn:0.1 --format "{{.Repository}}:{{.Tag}} {{.Size}}"
 
+      # Materializa o dado rastreado pelo DVC e, de quebra, confere o ponteiro:
+      # o script só termina bem se o md5 do arquivo bater com data/churn.csv.dvc.
+      - name: Materializa o dataset (DVC)
+        run: ./scripts/fetch_data.sh
+
       # O checkpoint do Encontro 3 é o treino rodando DENTRO do container, com o
-      # dataset entrando por volume. data/churn.csv não é versionado (DVC vem no
-      # Encontro 5), então este passo só roda quando o CSV está presente no
-      # checkout — numa branch de verificação, ou depois que o DVC entrar.
+      # dataset entrando por volume — e continua rodando depois do DVC, agora com
+      # o dado vindo do ponteiro em vez de vir do Git.
       - name: Treino no container (dados via volume)
-        if: hashFiles('data/churn.csv') != ''
         run: |
           mkdir -p artifacts
           docker run --rm \
@@ -39,7 +47,6 @@ jobs:
           ls -lh artifacts/
 
       - name: Publica o modelo treinado
-        if: hashFiles('data/churn.csv') != ''
         uses: actions/upload-artifact@v7
         with:
           name: churn-model

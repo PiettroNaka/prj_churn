@@ -5,12 +5,13 @@ artifacts/
 .env
 .pytest_cache/
 
-# dados: versionados no Git ATÉ o DVC entrar, no Encontro 5.
+# dados: rastreados pelo DVC desde o Encontro 5.
 #
-# São 981 KB — cabem no Git sem incomodar. Mantê-los fora custava caro em dois
-# lugares: quem clona o repositório não conseguia reproduzir o treino, e o CI
-# não conseguia rodar o treino dentro do container (checkpoint do Encontro 3).
-#
-# Quando `dvc add data/churn.csv` rodar, o próprio DVC recoloca o ignore aqui
-# e substitui o arquivo por data/churn.csv.dvc. Ou seja: isto não é um beco sem
-# saída, é o estado normal de "antes do DVC".
+# O ignore do CSV em si mora em data/.gitignore — quem o escreveu foi o
+# `dvc add`, e é ele que mantém o arquivo fora do Git. O que entra no Git é o
+# ponteiro data/churn.csv.dvc (md5 + tamanho), com os bytes no cache do DVC e
+# no remote. Para materializar o arquivo: ./scripts/fetch_data.sh (ou dvc pull).
+
+# cache local do DVC; o remote padrão fica FORA do repositório (../dvc-storage),
+# mas quem apontar um remote local para cá não deve versioná-lo por acidente.
+/dvc-storage/

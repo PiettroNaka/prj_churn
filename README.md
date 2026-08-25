@@ -15,7 +15,9 @@ prj_churn/
 │  ├─ model.py       # treino (entrypoint)
 │  └─ evaluate.py    # métricas
 ├─ tests/            # pytest
-├─ data/             # dataset (no Git até o Enc. 5, depois DVC)
+├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
+├─ scripts/          # fetch_data.sh — materializa o dataset
+├─ .dvc/             # config do DVC: remote e cache
 └─ pyproject.toml    # deps travadas (uv)
 ```
 
@@ -23,14 +25,19 @@ prj_churn/
 
 ```bash
 uv sync                          # cria o ambiente a partir do pyproject/uv.lock
+./scripts/fetch_data.sh          # traz data/churn.csv (o Git não o guarda mais)
 uv run python -m churn.model     # treina e imprime as métricas
 uv run pytest                    # roda os testes
 ```
+
+Os testes não precisam do dataset — usam amostras de `tests/conftest.py`. Quem
+precisa dele é o treino.
 
 Sem uv, para desenvolvimento rápido:
 
 ```bash
 pip install -e ".[dev]"
+./scripts/fetch_data.sh
 python -m churn.model
 pytest
 ```
@@ -77,6 +84,55 @@ acumulado é 0 de verdade — 4 delas são churners, e jogá-las fora tiraria si
 da classe minoritária. Em vez de excluir, o schema **exige** a relação: branco
 com `tenure > 0` é corrupção e reprova o dataset.
 
+## Versionamento de dados (Encontro 5)
+
+O CSV saiu do Git. O que o Git versiona agora é `data/churn.csv.dvc` — md5,
+tamanho e caminho — e os bytes ficam no cache do DVC e no *remote*.
+
+| | antes (Enc. 2–4) | agora |
+|---|---|---|
+| quem guarda os bytes | Git | cache do DVC + remote |
+| o que entra no commit | 981 KB de CSV | 3 linhas de ponteiro |
+| trocar de dataset | diff binário ilegível | uma linha de md5 mudando |
+| conferir integridade | à mão | `dvc status` |
+
+```bash
+uv sync --group data   # instala o dvc (fora do grupo padrão: o container não precisa)
+uv run dvc pull        # traz o dado a partir do remote
+uv run dvc status      # o arquivo no disco ainda bate com o ponteiro?
+uv run dvc push        # manda para o remote o que você acabou de rastrear
+```
+
+Ciclo de troca de dataset: substitua `data/churn.csv`, rode `dvc add
+data/churn.csv` (o `.dvc` muda), `dvc push` (os bytes sobem) e commite o `.dvc`.
+Git e DVC andam juntos — `git checkout` de um commit antigo seguido de `dvc
+checkout` devolve o dado daquele commit.
+
+### O remote
+
+O padrão é um diretório local, irmão do repositório:
+
+```ini
+['remote "storage"']
+    url = ../../dvc-storage      # relativo a .dvc/config, isto é: <repo>/../dvc-storage
+```
+
+Serve para exercitar o fluxo sem credencial nenhuma, mas não atravessa máquinas.
+Para um remote de verdade, uma linha resolve — o resto do fluxo não muda:
+
+```bash
+uv run dvc remote add -d storage s3://meu-bucket/churn   # ou gdrive://, azure://, ssh://
+uv run dvc remote modify --local storage ...             # credenciais em .dvc/config.local (não versionado)
+```
+
+### E quem clona hoje?
+
+Um remote local não viaja junto com o clone. Por isso existe
+`scripts/fetch_data.sh`: tenta `dvc pull` e, se não houver remote alcançável,
+recupera o CSV do blob que ficou no histórico do Git (o dataset esteve
+versionado até o Encontro 5) e **confere o md5 contra o `.dvc`**. É como o CI
+materializa o dado para rodar o treino no container.
+
 ## O que mudou em relação ao `train_churn.py`
 
 | Script monolítico | Projeto modular |
@@ -94,5 +150,5 @@ com `tenure > 0` é corrupção e reprova o dataset.
 
 - **Enc. 3** ✓ — containerizado: `Dockerfile`, `.dockerignore` e `compose.yml`.
 - **Enc. 4** ✓ — validação de dados com pandera (`validation.py`).
-- **Enc. 5** — versionar `data/` com DVC.
+- **Enc. 5** ✓ — `data/` versionado com DVC (`data/churn.csv.dvc`, remote, `scripts/fetch_data.sh`).
 - **Enc. 6** — rastrear experimentos com MLflow.
