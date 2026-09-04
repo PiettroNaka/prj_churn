@@ -3,10 +3,11 @@
 Funções puras (recebem/retornam DataFrame, sem efeito colateral) compostas por
 uma orquestração fina em ``load_clean``.
 
-A validação escrita à mão do Encontro 2 foi substituída, no Encontro 4, pelos
-schemas declarativos do pandera em :mod:`churn.validation`. O pipeline agora é
-validado **duas vezes**: no dado cru, antes de qualquer transformação, e no dado
-já limpo, antes de virar feature.
+A validação escrita à mão do Encontro 2 foi substituída, no Encontro 4, pelo
+contrato declarativo do pandera: os schemas vivem em :mod:`churn.schema` e são
+executados por :mod:`churn.validation`. O pipeline é validado **duas vezes**: no
+dado cru, antes de qualquer transformação, e no dado já limpo, antes de virar
+feature.
 """
 from __future__ import annotations
 
@@ -14,11 +15,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from churn.validation import RAW_SCHEMA, validate_clean, validate_raw
+from churn.schema import COLUNAS_CRU
+from churn.validation import validate_clean, validate_raw
 
-# Schema esperado do dataset Telco Customer Churn.
-# Derivado do RAW_SCHEMA para não existirem duas listas de colunas divergindo.
-EXPECTED_COLUMNS: frozenset[str] = frozenset(RAW_SCHEMA.columns)
+# Colunas esperadas do dataset Telco Customer Churn.
+# Vêm do ChurnRawSchema para não existirem duas listas de colunas divergindo.
+EXPECTED_COLUMNS: frozenset[str] = COLUNAS_CRU
 
 
 def load_raw(path: Path) -> pd.DataFrame:
@@ -27,12 +29,12 @@ def load_raw(path: Path) -> pd.DataFrame:
 
 
 def validate(df: pd.DataFrame, target: str) -> pd.DataFrame:
-    """Valida o dado cru contra o ``RAW_SCHEMA``. Levanta ValueError.
+    """Valida o dado cru contra o ``ChurnRawSchema``. Levanta ValueError.
 
     ``target`` é conferido contra o schema: se a configuração apontar para uma
     coluna-alvo que o contrato não declara, isso é erro de config, não de dado.
     """
-    if target not in RAW_SCHEMA.columns:
+    if target not in COLUNAS_CRU:
         raise ValueError(
             f"Alvo '{target}' não é uma coluna declarada no schema do dataset."
         )
@@ -49,7 +51,7 @@ def coerce_total_charges(df: pd.DataFrame) -> pd.DataFrame:
 
     Os brancos correspondem a clientes com ``tenure == 0`` (novos), cujo total
     gasto é, de fato, 0 — não um número mágico como no script original. O
-    ``CLEAN_SCHEMA`` exige essa relação: zero só é aceito com ``tenure == 0``.
+    ``ChurnSchema`` exige essa relação: zero só é aceito com ``tenure == 0``.
     """
     out = df.copy()
     out["TotalCharges"] = pd.to_numeric(out["TotalCharges"], errors="coerce").fillna(0.0)

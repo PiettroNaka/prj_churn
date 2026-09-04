@@ -97,8 +97,9 @@ def test_tenure_fora_da_faixa(raw_frame, valor):
         validate_raw(sujo)
 
 
-@pytest.mark.parametrize("valor", [0.0, -10.0])
-def test_mensalidade_nao_positiva(raw_frame, valor):
+@pytest.mark.parametrize("valor", [0.0, -10.0, 999.0])
+def test_mensalidade_fora_da_faixa(raw_frame, valor):
+    """Zero, negativo e absurdo: a faixa cobre os dois lados, não só o piso."""
     sujo = raw_frame.copy()
     sujo.loc[0, "MonthlyCharges"] = valor
     with pytest.raises(DataValidationError):
@@ -195,3 +196,22 @@ def test_dataset_real_passa_nos_dois_schemas():
     cru = pd.read_csv(DATASET)
     validate_raw(cru)
     validate_clean(coerce_total_charges(drop_identifier(cru, "customerID")))
+
+
+@pytest.mark.skipif(not DATASET.exists(), reason="data/churn.csv não versionado")
+def test_dataset_real_com_linha_adulterada_reprova():
+    """A tarefa do Encontro 4: quebrar de propósito e ver o contrato pegar.
+
+    Duas quebras na MESMA linha, para provar o ``lazy=True``: o relatório traz
+    as duas de uma vez, e não só a primeira que o pandera encontrou.
+    """
+    sujo = pd.read_csv(DATASET)
+    sujo.loc[0, "tenure"] = 999
+    sujo.loc[0, "Contract"] = "Vitalício"
+
+    with pytest.raises(DataValidationError) as erro:
+        validate_raw(sujo)
+
+    casos = erro.value.failure_cases
+    assert {"tenure", "Contract"} <= set(casos["column"])
+    assert {999, "Vitalício"} <= set(casos["failure_case"])

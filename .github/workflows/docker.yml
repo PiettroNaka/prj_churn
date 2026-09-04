@@ -33,6 +33,15 @@ jobs:
       - name: Materializa o dataset (DVC)
         run: ./scripts/fetch_data.sh
 
+      # Checkpoint do Encontro 4: o dado adulterado de propósito tem de reprovar.
+      # scripts/ não entra na imagem (só src/); entra por volume, como os dados.
+      - name: Quebra proposital (o contrato tem de pegar)
+        run: |
+          docker run --rm \
+            -v "$PWD/data:/app/data" \
+            -v "$PWD/scripts:/app/scripts" \
+            churn:0.1 uv run python scripts/quebra_proposital.py
+
       # O checkpoint do Encontro 3 é o treino rodando DENTRO do container, com o
       # dataset entrando por volume — e continua rodando depois do DVC, agora com
       # o dado vindo do ponteiro em vez de vir do Git.
