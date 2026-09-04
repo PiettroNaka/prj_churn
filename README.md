@@ -79,9 +79,9 @@ dois, à vista — em vez de `coerce=True` mascarando sujeira de verdade.
 
 | Camada | Cobre |
 |---|---|
-| schema | as 21 colunas, tipos, nenhuma coluna a mais (`strict`) |
+| schema | as 21 colunas e seus tipos (`coerce=True` converte ao validar; `strict=False` tolera coluna a mais) |
 | domínio | as categorias válidas de cada coluna, `customerID` único |
-| faixas | `tenure` 0–72, `MonthlyCharges` 0 < x ≤ 200, `TotalCharges` ≥ 0 |
+| faixas | `tenure` 0–72, `MonthlyCharges` 18–119, `TotalCharges` ≥ 0 |
 | nulos | alvo `Churn` nunca nulo |
 | coerência | sem internet ⇒ os 6 add-ons dizem `No internet service`; sem telefone ⇒ `MultipleLines` diz `No phone service` |
 | relações | `TotalCharges` ≈ `tenure` × `MonthlyCharges` (tolerância de 10%) quando `tenure > 1` |
@@ -109,11 +109,19 @@ relação TotalCharges ≈ tenure × MonthlyCharges (tenure > 1):
   desvio mediano 1.5%, máximo 3.0%  — contrato tolera 10%
 ```
 
-O teto de `MonthlyCharges` é 200 e não os 118,75 observados de propósito: a
-faixa existe para pegar `999`, `-1` e `1e6`, não para reprovar um reajuste
-legítimo. A tolerância de 10% na relação segue a mesma régua — o pior caso
-observado é 3%. Essa é a regra mais forte do contrato: faixa isolada aprova
-`TotalCharges = 20` num cliente de 70 meses pagando 100 por mês; a relação não. "Comece frouxo, aperte com o tempo" — o aperto que vale a pena aqui é
+A faixa de `MonthlyCharges` é a do encontro — 18–119, o observado arredondado
+para fora. É uma faixa colada no dado: pega `999`, `-1` e `1e6`, e também
+reprovaria o dataset no dia em que um plano novo custasse 130. A tolerância de
+10% na relação é mais folgada porque o pior caso observado é 3%. E a relação é a
+regra mais forte do contrato: faixa isolada aprova `TotalCharges = 20` num
+cliente de 70 meses pagando 100 por mês; a relação não.
+
+A `Config` também é a do encontro — `coerce = True`, `strict = False`. A
+comodidade tem preço, e o próprio encontro avisa qual: `tenure = 12.7` não
+reprova, vira `12` em silêncio (há um teste fixando isso). O que segura o
+estrago é validar em dois pontos — o que a coerção esconde no CSV cru, o schema
+do dado limpo cobra num tipo já definido. Coluna **faltando** continua sendo
+erro; `strict=False` tolera só a coluna a mais. "Comece frouxo, aperte com o tempo" — o aperto que vale a pena aqui é
 o `strict=True`, porque coluna nova neste dataset é sintoma de extração errada.
 
 ### Quebrar de propósito

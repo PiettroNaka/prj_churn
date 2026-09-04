@@ -41,10 +41,15 @@ def test_coluna_faltando(raw_frame):
         validate_raw(raw_frame.drop(columns=["Contract"]))
 
 
-def test_coluna_extra_inesperada(raw_frame):
+def test_coluna_extra_e_tolerada(raw_frame):
+    """``strict=False`` (a Config do encontro): coluna a mais não reprova.
+
+    O contrato cobra o que declara. Um extrator que passa a mandar uma coluna
+    nova não derruba o pipeline — e é por isso que a coluna faltando, logo
+    acima, continua sendo erro: falta é quebra de contrato, sobra não.
+    """
     sujo = raw_frame.assign(coluna_intrusa=1)
-    with pytest.raises(DataValidationError):
-        validate_raw(sujo)
+    assert validate_raw(sujo) is not None
 
 
 def test_identificador_duplicado(raw_frame):
@@ -104,6 +109,22 @@ def test_mensalidade_fora_da_faixa(raw_frame, valor):
     sujo.loc[0, "MonthlyCharges"] = valor
     with pytest.raises(DataValidationError):
         validate_raw(sujo)
+
+
+def test_coerce_converte_o_tipo_em_silencio(raw_frame):
+    """O preço do ``coerce=True``: tipo errado vira tipo certo, sem reclamar.
+
+    ``tenure = 12.7`` não é reprovado, é truncado para 12. Está aqui como teste
+    para o custo ficar versionado e visível: é exatamente a "sujeira mascarada"
+    de que o encontro avisa, e a razão de o pipeline validar duas vezes.
+    """
+    quase = raw_frame.copy()
+    quase["tenure"] = quase["tenure"].astype(float)
+    quase.loc[0, "tenure"] = 12.7
+
+    validado = validate_raw(quase)
+
+    assert validado.loc[0, "tenure"] == 12
 
 
 def test_senior_citizen_fora_do_binario(raw_frame):

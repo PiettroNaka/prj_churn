@@ -30,16 +30,18 @@ documentação; um schema em `.py` é uma barreira.
 
 **Validar na fronteira, e nos dois lados da limpeza.** O contrato roda quando o
 dado *entra* (`ChurnRawSchema`, no CSV cru) e outra vez depois da limpeza
-(`ChurnSchema`, antes de virar feature). Isso responde ao atrito do encontro:
-coerção de tipos mascara sujeira quando acontece escondida — aqui ela acontece
-entre um schema e outro, à vista.
+(`ChurnSchema`, antes de virar feature). É o que sustenta o `coerce=True` da
+Config: a coerção converte tipo em silêncio — `tenure = 12.7` vira `12` sem
+reclamar — e o segundo schema cobra o dado num tipo já definido, depois de a
+limpeza do `data.py` ter passado. Validar uma vez só, com coerção ligada, seria
+a pior das combinações.
 
 ## Os atritos, e a posição deste repositório
 
 | Atrito | O que fizemos |
 |---|---|
-| **strict demais barra dado válido** | `strict=True` mesmo assim: o dataset é fechado e conhecido, coluna nova é sintoma de extração errada. A folga foi para outro lugar — o teto de `MonthlyCharges` é 200, não os 118,75 do profiling |
-| **`coerce=True` mascara sujeira** | `coerce=False`; quem converte é o `data.py`, à vista, entre os dois schemas |
+| **strict demais barra dado válido** | `strict=False`, como o encontro declara: coluna a mais é tolerada, coluna faltando não. A faixa de `MonthlyCharges` é a do encontro (18–119) — colada no dado, e assumidamente apertada |
+| **`coerce=True` mascara sujeira** | `coerce=True`, como o encontro declara — e o antídoto é validar duas vezes: o que a coerção esconde no cru, o schema do limpo cobra num tipo já definido |
 | **categoria nova quebra o `isin`** | hoje é erro fatal, porque em curso o dataset é estável. Em produção o caminho seria alertar e quarentenar o lote, não derrubar o pipeline |
 | **onde validar** | na fronteira: ao ler o CSV, e de novo antes das features |
 

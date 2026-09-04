@@ -13,9 +13,9 @@ wrangling):
 - :class:`ChurnSchema` valida o DataFrame **depois** de ``load_clean``, quando o
   identificador já saiu e ``TotalCharges`` virou número.
 
-Validar nos dois pontos é a resposta ao atrito "coerce mascara sujeira": a
-coerção acontece entre um schema e outro, à vista, e cada lado cobra o que faz
-sentido no seu estágio.
+Validar nos dois pontos é o que sustenta o ``coerce=True`` da Config: a coerção
+é comodidade que esconde sujeira, e o segundo schema cobra o dado num tipo já
+definido, depois de a limpeza do ``data.py`` ter passado.
 
 As faixas não são chute — saem do profiling (``scripts/profiling.py``):
 
@@ -23,7 +23,7 @@ As faixas não são chute — saem do profiling (``scripts/profiling.py``):
 coluna           observado           faixa no contrato
 ===============  ==================  ================================
 tenure           0–72                0–72 (teto do produto)
-MonthlyCharges   18,25–118,75        0 < x ≤ 200 (folga para reajuste)
+MonthlyCharges   18,25–118,75        18–119 (o observado, arredondado)
 TotalCharges     branco em 11 linhas ≥ 0, e branco só com tenure 0
 ===============  ==================  ================================
 
@@ -68,10 +68,13 @@ TENURE_MAX = 72
 #: ou valor truncado.
 TOLERANCIA_TOTAL = 0.10
 
-#: Teto da mensalidade. O profiling dá 118,75; o contrato deixa folga porque
-#: reajuste é evento legítimo e "strict demais vira ruído" — o que a faixa tem
-#: de pegar é 999, -1 e 1e6, não um preço novo.
-MONTHLY_MAX = 200.0
+#: Faixa da mensalidade, como o encontro declara: 18–119. São o piso e o teto
+#: observados no profiling (18,25 e 118,75), arredondados para fora. É uma faixa
+#: colada no dado — pega 999, -1 e 1e6, e também reprova o dataset inteiro no dia
+#: em que um plano novo custar 130. Apertar assim é decisão consciente: o dataset
+#: do curso é fechado, e faixa larga demais não ensina nada.
+MONTHLY_MIN = 18.0
+MONTHLY_MAX = 119.0
 
 
 # --------------------------------------------------------------------------
@@ -146,20 +149,26 @@ class _ChurnBase(pa.DataFrameModel):
         ge=0, le=TENURE_MAX, description=f"Meses de contrato, 0 a {TENURE_MAX}."
     )
     MonthlyCharges: Series[float] = pa.Field(
-        gt=0, le=MONTHLY_MAX, description="Mensalidade corrente; sempre positiva."
+        ge=MONTHLY_MIN,
+        le=MONTHLY_MAX,
+        description=f"Mensalidade corrente, de {MONTHLY_MIN:.0f} a {MONTHLY_MAX:.0f}.",
     )
 
     # ---- alvo: nunca nulo, ou o rótulo do treino é inventado ----
     Churn: Series[str] = pa.Field(isin=SIM_NAO, nullable=False)
 
     class Config:
-        # strict: coluna a mais reprova. O atrito do encontro manda começar
-        # frouxo, mas aqui o dataset é fechado e conhecido — coluna nova é
-        # sintoma de extração errada, não de evolução do produto.
-        strict = True
-        # coerce=False de propósito: quem converte tipo é o data.py, à vista,
-        # entre um schema e outro. Coerção silenciosa mascara sujeira de verdade.
-        coerce = False
+        # A Config do encontro, literal.
+        #
+        # coerce: o schema converte o tipo ao validar. Comodidade com preço — o
+        # próprio encontro avisa que coerção mascara sujeira de verdade. O
+        # antídoto aqui é validar em DOIS pontos (cru e limpo): o que a coerção
+        # esconder no primeiro, o segundo cobra num tipo já definido.
+        coerce = True
+        # strict=False: coluna a mais é tolerada. Um extrator que passa a mandar
+        # uma coluna nova não derruba o pipeline; o contrato cobra o que declara,
+        # não a ausência do que não declara.
+        strict = False
 
     @pa.dataframe_check(
         name="servicos_de_internet_coerentes",
