@@ -80,7 +80,7 @@ dois, à vista — em vez de `coerce=True` mascarando sujeira de verdade.
 | Camada | Cobre |
 |---|---|
 | schema | as 21 colunas e seus tipos (`coerce=True` converte ao validar; `strict=False` tolera coluna a mais) |
-| domínio | as categorias válidas de cada coluna, `customerID` único |
+| domínio | as categorias válidas de cada coluna, `customerID` único — erro fatal, exceto nas duas colunas de catálogo, onde é alerta (abaixo) |
 | faixas | `tenure` 0–72, `MonthlyCharges` 18–119, `TotalCharges` ≥ 0 |
 | nulos | alvo `Churn` nunca nulo |
 | coerência | sem internet ⇒ os 6 add-ons dizem `No internet service`; sem telefone ⇒ `MultipleLines` diz `No phone service` |
@@ -124,6 +124,24 @@ do dado limpo cobra num tipo já definido. Coluna **faltando** continua sendo
 erro; `strict=False` tolera só a coluna a mais. "Comece frouxo, aperte com o tempo" — o aperto que vale a pena aqui é
 o `strict=True`, porque coluna nova neste dataset é sintoma de extração errada.
 
+### Erro ou alerta: nem toda violação é a mesma coisa
+
+Categoria nova em produção é o atrito clássico do encontro — o `isin` reprova um
+valor que é legítimo. Só que tratar *toda* categoria como alerta desarma o
+contrato. O corte aqui é por consequência, não por gosto:
+
+| Coluna | Valor novo significa | Severidade |
+|---|---|---|
+| `InternetService`, `PaymentMethod` | o negócio lançou algo (5G, Pix) — o cliente é real, a linha está certa | **alerta**: passa, registra, alguém decide se o schema cresce |
+| `Contract` | mudou a feature nº 1 do modelo (importância 0,175 — 3,7× `PaymentMethod`) | **erro**: seguir treinando é pior que parar |
+| `Churn` | o alvo virou outra coisa | **erro** |
+| binários e derivados (`gender`, add-ons, `MultipleLines`…) | um terceiro valor onde só existem dois | **erro**: é corrupção, não lançamento |
+
+O alerta é `raise_warning=True` no `Field`, e `validation.py` o registra em log e
+o reemite — alerta que ninguém lê é validação que não valida. Alerta e erro
+convivem no mesmo passe: uma linha com `PaymentMethod = "Pix"` **e** `tenure =
+999` reprova pelo `tenure` e avisa do `Pix`, no mesmo relatório.
+
 ### Quebrar de propósito
 
 O contrato só vale se alguém já o viu pegar alguma coisa:
@@ -132,8 +150,9 @@ O contrato só vale se alguém já o viu pegar alguma coisa:
 uv run python scripts/quebra_proposital.py
 ```
 
-Ele valida o dataset real (tem de passar), adultera **uma** linha com
-`tenure = 999` e `Contract = "Vitalício"`, e mostra o relatório:
+São três atos: valida o dataset real (tem de passar), adultera **uma** linha com
+`tenure = 999` e `Contract = "Vitalício"` (tem de reprovar), e por fim põe
+`PaymentMethod = "Pix"` (tem de passar, com alerta). O relatório do segundo ato:
 
 ```
   column       check                                failure_case
@@ -144,8 +163,10 @@ Ele valida o dataset real (tem de passar), adultera **uma** linha com
 ```
 
 As duas violações num relatório só é o `lazy=True` fazendo efeito. O script sai
-com código 1 se o dado adulterado passar — por isso ele roda no CI, junto dos
-testes que sujam uma coisa de cada vez (`tests/test_validation.py`).
+com código 1 se o dado adulterado passar, se a categoria de catálogo derrubar o
+pipeline, ou se ela passar em silêncio — os três modos de o contrato estar
+errado. Por isso ele roda no CI, junto dos testes que sujam uma coisa de cada vez
+(`tests/test_validation.py`).
 
 ### Por que as 11 linhas em branco não foram descartadas
 

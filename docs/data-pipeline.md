@@ -42,7 +42,7 @@ a pior das combinações.
 |---|---|
 | **strict demais barra dado válido** | `strict=False`, como o encontro declara: coluna a mais é tolerada, coluna faltando não. A faixa de `MonthlyCharges` é a do encontro (18–119) — colada no dado, e assumidamente apertada |
 | **`coerce=True` mascara sujeira** | `coerce=True`, como o encontro declara — e o antídoto é validar duas vezes: o que a coerção esconde no cru, o schema do limpo cobra num tipo já definido |
-| **categoria nova quebra o `isin`** | hoje é erro fatal, porque em curso o dataset é estável. Em produção o caminho seria alertar e quarentenar o lote, não derrubar o pipeline |
+| **categoria nova quebra o `isin`** | alerta nas colunas de catálogo (`InternetService`, `PaymentMethod`), erro no resto. Um meio de pagamento novo não pode derrubar o pipeline; um `Contract` novo — a feature nº 1 do modelo — tem de parar |
 | **onde validar** | na fronteira: ao ler o CSV, e de novo antes das features |
 
 ## O DATA como artefato — a ponte para o Encontro 5

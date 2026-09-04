@@ -59,6 +59,19 @@ SERVICOS_INTERNET = (
 
 ADD_ONS_INTERNET = SIM_NAO + [SEM_INTERNET]
 
+#: Colunas cujo domínio é **catálogo comercial**: a lista muda porque o negócio
+#: lançou algo, não porque o dado apodreceu. Pix e 5G existem; o cliente é real e
+#: a linha está correta. Nelas, categoria fora do domínio é ALERTA — o pipeline
+#: segue e alguém decide se o schema tem de crescer.
+#:
+#: O corte não é de gosto, é de consequência. ``Contract`` também é catálogo, mas
+#: é a feature nº 1 do modelo (importância 0,175 contra 0,047 do PaymentMethod e
+#: 0,026 do InternetService): um valor novo ali muda o que o modelo significa, e
+#: seguir treinando seria pior que parar. ``Churn`` é o alvo, e as demais são
+#: binários ou valores derivados — um terceiro valor lá é corrupção, não
+#: lançamento. Todas essas continuam sendo erro fatal.
+CATEGORIAS_DE_CATALOGO = ("InternetService", "PaymentMethod")
+
 #: Contrato de 72 meses é o teto do produto — nada acima disso é plausível.
 TENURE_MAX = 72
 
@@ -126,7 +139,10 @@ class _ChurnBase(pa.DataFrameModel):
     Dependents: Series[str] = pa.Field(isin=SIM_NAO)
     PhoneService: Series[str] = pa.Field(isin=SIM_NAO)
     MultipleLines: Series[str] = pa.Field(isin=SIM_NAO + [SEM_TELEFONE])
-    InternetService: Series[str] = pa.Field(isin=["DSL", "Fiber optic", "No"])
+    # alerta, não erro: ver CATEGORIAS_DE_CATALOGO
+    InternetService: Series[str] = pa.Field(
+        isin=["DSL", "Fiber optic", "No"], raise_warning=True
+    )
     OnlineSecurity: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
     OnlineBackup: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
     DeviceProtection: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
@@ -135,13 +151,15 @@ class _ChurnBase(pa.DataFrameModel):
     StreamingMovies: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
     Contract: Series[str] = pa.Field(isin=["Month-to-month", "One year", "Two year"])
     PaperlessBilling: Series[str] = pa.Field(isin=SIM_NAO)
+    # alerta, não erro: ver CATEGORIAS_DE_CATALOGO
     PaymentMethod: Series[str] = pa.Field(
         isin=[
             "Electronic check",
             "Mailed check",
             "Bank transfer (automatic)",
             "Credit card (automatic)",
-        ]
+        ],
+        raise_warning=True,
     )
 
     # ---- numéricas: faixa ----

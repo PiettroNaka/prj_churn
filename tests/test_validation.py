@@ -9,6 +9,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from pandera.errors import SchemaWarning
+
 from churn.validation import (
     DataValidationError,
     validate_clean,
@@ -68,18 +70,56 @@ def test_identificador_duplicado(raw_frame):
     ("coluna", "valor"),
     [
         ("gender", "F"),
-        ("Contract", "Mensal"),
-        ("PaymentMethod", "Pix"),
-        ("InternetService", "5G"),
+        ("Contract", "Vitalício"),
         ("Churn", "Sim"),
         ("OnlineSecurity", "Talvez"),
+        ("MultipleLines", "Três"),
     ],
 )
-def test_categoria_fora_do_dominio(raw_frame, coluna, valor):
+def test_categoria_fora_do_dominio_reprova(raw_frame, coluna, valor):
+    """Alvo, binários e derivados: valor novo ali é corrupção, não lançamento.
+
+    ``Contract`` entra aqui apesar de ser catálogo: é a feature nº 1 do modelo
+    (importância 0,175), e um valor novo muda o que o modelo significa.
+    """
     sujo = raw_frame.copy()
     sujo.loc[0, coluna] = valor
     with pytest.raises(DataValidationError):
         validate_raw(sujo)
+
+
+@pytest.mark.parametrize(
+    ("coluna", "valor"),
+    [("PaymentMethod", "Pix"), ("InternetService", "5G")],
+)
+def test_categoria_nova_de_catalogo_e_alerta(raw_frame, coluna, valor):
+    """Catálogo comercial: o negócio lançou algo, o dado está certo.
+
+    O pipeline segue e o alerta sai — reprovar aqui seria derrubar produção por
+    causa de um produto novo.
+    """
+    novo = raw_frame.copy()
+    novo.loc[0, coluna] = valor
+
+    with pytest.warns(SchemaWarning, match=valor):
+        validado = validate_raw(novo)
+
+    assert validado.loc[0, coluna] == valor
+
+
+def test_alerta_e_erro_convivem_no_mesmo_relatorio(raw_frame):
+    """Uma linha com as duas coisas: o erro reprova, o alerta é emitido junto."""
+    sujo = raw_frame.copy()
+    sujo.loc[0, "PaymentMethod"] = "Pix"
+    sujo.loc[0, "tenure"] = 999
+
+    with pytest.warns(SchemaWarning, match="Pix"):
+        with pytest.raises(DataValidationError) as erro:
+            validate_raw(sujo)
+
+    casos = erro.value.failure_cases
+    assert "tenure" in set(casos["column"])
+    assert "PaymentMethod" not in set(casos["column"])
 
 
 def test_alvo_nulo(raw_frame):
