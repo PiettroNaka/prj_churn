@@ -62,6 +62,12 @@ ADD_ONS_INTERNET = SIM_NAO + [SEM_INTERNET]
 #: Contrato de 72 meses é o teto do produto — nada acima disso é plausível.
 TENURE_MAX = 72
 
+#: Tolerância da relação TotalCharges ≈ tenure × MonthlyCharges. O profiling dá
+#: 1,5% de desvio mediano e 3,0% no pior caso; 10% deixa folga para reajuste no
+#: meio do contrato e mês proporcional, sem abrir a porta para coluna invertida
+#: ou valor truncado.
+TOLERANCIA_TOTAL = 0.10
+
 #: Teto da mensalidade. O profiling dá 118,75; o contrato deixa folga porque
 #: reajuste é evento legítimo e "strict demais vira ruído" — o que a faixa tem
 #: de pegar é 999, -1 e 1e6, não um preço novo.
@@ -233,17 +239,23 @@ class ChurnSchema(_ChurnBase):
         return bool((df.loc[df["TotalCharges"] == 0, "tenure"] == 0).all())
 
     @pa.dataframe_check(
-        name="total_compativel_com_mensalidade",
-        error="TotalCharges menor que uma mensalidade em cliente com tenure > 1.",
+        name="total_coerente_com_tenure_e_mensalidade",
+        error="TotalCharges longe de tenure × MonthlyCharges "
+        f"(tolerância de {TOLERANCIA_TOTAL:.0%}) em cliente com tenure > 1.",
     )
-    def total_compativel_com_mensalidade(cls, df: pd.DataFrame) -> bool:
-        """Pega inversão de colunas e truncamento — erros que passam por faixa isolada."""
+    def total_coerente_com_tenure_e_mensalidade(cls, df: pd.DataFrame) -> bool:
+        """A relação entre as três colunas numéricas — a regra mais forte do contrato.
+
+        Uma faixa isolada aprova ``TotalCharges = 20`` num cliente de 70 meses
+        pagando 100 por mês; a relação não. É o que pega coluna invertida, valor
+        truncado e unidade errada — erros que nenhum ``ge``/``le`` enxerga.
+        """
         cobrado = df["tenure"] > 1
         if not cobrado.any():
             return True
-        return bool(
-            (df.loc[cobrado, "TotalCharges"] >= df.loc[cobrado, "MonthlyCharges"]).all()
-        )
+        esperado = df.loc[cobrado, "tenure"] * df.loc[cobrado, "MonthlyCharges"]
+        desvio = (df.loc[cobrado, "TotalCharges"] - esperado).abs() / esperado
+        return bool((desvio <= TOLERANCIA_TOTAL).all())
 
 
 #: Colunas declaradas no contrato do dado cru. Fonte única — quem precisa saber

@@ -83,7 +83,8 @@ dois, à vista — em vez de `coerce=True` mascarando sujeira de verdade.
 | domínio | as categorias válidas de cada coluna, `customerID` único |
 | faixas | `tenure` 0–72, `MonthlyCharges` 0 < x ≤ 200, `TotalCharges` ≥ 0 |
 | nulos | alvo `Churn` nunca nulo |
-| coerência | sem internet ⇒ os 6 add-ons dizem `No internet service`; sem telefone ⇒ `MultipleLines` diz `No phone service`; `TotalCharges` ≥ uma mensalidade quando `tenure > 1` |
+| coerência | sem internet ⇒ os 6 add-ons dizem `No internet service`; sem telefone ⇒ `MultipleLines` diz `No phone service` |
+| relações | `TotalCharges` ≈ `tenure` × `MonthlyCharges` (tolerância de 10%) quando `tenure > 1` |
 
 Falha levanta `DataValidationError` (que é um `ValueError`) em modo `lazy` — o
 relatório traz **todas** as violações de uma vez, não só a primeira, e vem
@@ -103,9 +104,16 @@ tenure                0.00     72.00     36.48   ≥ 0 e ≤ 72
 MonthlyCharges       18.25    118.75     68.68   > 0 e ≤ 200.0
 ```
 
+```
+relação TotalCharges ≈ tenure × MonthlyCharges (tenure > 1):
+  desvio mediano 1.5%, máximo 3.0%  — contrato tolera 10%
+```
+
 O teto de `MonthlyCharges` é 200 e não os 118,75 observados de propósito: a
 faixa existe para pegar `999`, `-1` e `1e6`, não para reprovar um reajuste
-legítimo. "Comece frouxo, aperte com o tempo" — o aperto que vale a pena aqui é
+legítimo. A tolerância de 10% na relação segue a mesma régua — o pior caso
+observado é 3%. Essa é a regra mais forte do contrato: faixa isolada aprova
+`TotalCharges = 20` num cliente de 70 meses pagando 100 por mês; a relação não. "Comece frouxo, aperte com o tempo" — o aperto que vale a pena aqui é
 o `strict=True`, porque coluna nova neste dataset é sintoma de extração errada.
 
 ### Quebrar de propósito

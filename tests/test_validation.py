@@ -163,6 +163,24 @@ def test_total_menor_que_uma_mensalidade(clean_frame):
         validate_clean(sujo)
 
 
+@pytest.mark.parametrize("fator", [0.5, 1.5])
+def test_total_longe_do_produto_tenure_x_mensalidade(clean_frame, fator):
+    """Metade ou uma vez e meia o esperado: fora da tolerância, reprova."""
+    sujo = clean_frame.copy()
+    esperado = sujo.loc[0, "tenure"] * sujo.loc[0, "MonthlyCharges"]
+    sujo.loc[0, "TotalCharges"] = esperado * fator
+    with pytest.raises(DataValidationError):
+        validate_clean(sujo)
+
+
+def test_total_dentro_da_tolerancia_passa(clean_frame):
+    """Reajuste no meio do contrato não pode reprovar o dataset inteiro."""
+    quase = clean_frame.copy()
+    esperado = quase.loc[0, "tenure"] * quase.loc[0, "MonthlyCharges"]
+    quase.loc[0, "TotalCharges"] = esperado * 1.05
+    assert validate_clean(quase) is not None
+
+
 # --------------------------------------------------------------------------
 # coerência entre colunas
 # --------------------------------------------------------------------------

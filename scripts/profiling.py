@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from churn.schema import ChurnRawSchema
+from churn.schema import TOLERANCIA_TOTAL, ChurnRawSchema
 
 DATASET = Path("data/churn.csv")
 NUMERICAS = ["tenure", "MonthlyCharges"]
@@ -63,6 +63,15 @@ def main() -> int:
         f"{int((df.loc[total.isna(), 'tenure'] == 0).sum())} deles com tenure 0"
     )
     print(f"  numérico: {total.min():.2f} a {total.max():.2f}")
+
+    cobrado = df["tenure"] > 1
+    esperado = (df["tenure"] * df["MonthlyCharges"])[cobrado]
+    desvio = ((total[cobrado] - esperado).abs() / esperado).dropna()
+    print(
+        f"\nrelação TotalCharges ≈ tenure × MonthlyCharges (tenure > 1):"
+        f"\n  desvio mediano {desvio.median():.1%}, máximo {desvio.max():.1%}"
+        f"  — contrato tolera {TOLERANCIA_TOTAL:.0%}"
+    )
 
     print(f"\nnulos: {int(df.isna().sum().sum())} em todo o dataset")
 
