@@ -4,7 +4,9 @@ name: docker
 
 on:
   push:
-    branches: [main]
+    # As branches de trabalho também: um entregável que nunca passou pelo CI é
+    # um entregável verificado só na máquina de quem escreveu.
+    branches: [main, 'claude/**', 'feat/**']
   pull_request:
 
 jobs:
