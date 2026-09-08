@@ -11,6 +11,7 @@ feature.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
@@ -59,7 +60,11 @@ def coerce_total_charges(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _com_quarentena(df: pd.DataFrame, validar, pasta: Path | None) -> pd.DataFrame:
+def _com_quarentena(
+    df: pd.DataFrame,
+    validar: Callable[[pd.DataFrame], pd.DataFrame],
+    pasta: Path | None,
+) -> pd.DataFrame:
     """Valida e, se reprovar, separa o lote ruim antes de deixar a falha subir.
 
     A quarentena mora aqui, na orquestração, e não dentro de ``validate_*``: o
