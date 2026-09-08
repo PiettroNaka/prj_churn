@@ -15,8 +15,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from churn.quarentena import quarentenar
 from churn.schema import COLUNAS_CRU
-from churn.validation import validate_clean, validate_raw
+from churn.validation import DataValidationError, validate_clean, validate_raw
 
 # Colunas esperadas do dataset Telco Customer Churn.
 # Vêm do ChurnRawSchema para não existirem duas listas de colunas divergindo.
@@ -58,10 +59,40 @@ def coerce_total_charges(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def load_clean(data_path: Path, id_column: str, target: str) -> pd.DataFrame:
-    """Pipeline de dados: carrega -> valida cru -> remove id -> coage -> valida limpo."""
+def _com_quarentena(df: pd.DataFrame, validar, pasta: Path | None) -> pd.DataFrame:
+    """Valida e, se reprovar, separa o lote ruim antes de deixar a falha subir.
+
+    A quarentena mora aqui, na orquestração, e não dentro de ``validate_*``: o
+    validador responde se o dado serve, sem escrever nada em disco. Quem decide
+    o que fazer com um lote reprovado é o pipeline.
+    """
+    if pasta is None:
+        return validar(df)
+    try:
+        return validar(df)
+    except DataValidationError as erro:
+        destino = quarentenar(df, erro, pasta)
+        raise DataValidationError(
+            f"{erro}\n\nLote em quarentena: {destino}",
+            failure_cases=erro.failure_cases,
+        ) from erro
+
+
+def load_clean(
+    data_path: Path,
+    id_column: str,
+    target: str,
+    quarantine_dir: Path | None = None,
+) -> pd.DataFrame:
+    """Pipeline de dados: carrega -> valida cru -> remove id -> coage -> valida limpo.
+
+    ``quarantine_dir`` liga a quarentena do Encontro 4: reprovando, o lote é
+    gravado lá antes de a exceção subir. ``None`` desliga, e é o padrão — quem
+    escolhe onde o lote ruim mora é quem orquestra (``model.train`` passa
+    ``cfg.quarantine_dir``), não esta função.
+    """
     df = load_raw(data_path)
-    df = validate(df, target)
+    df = _com_quarentena(df, lambda frame: validate(frame, target), quarantine_dir)
     df = drop_identifier(df, id_column)
     df = coerce_total_charges(df)
-    return validate_clean(df)
+    return _com_quarentena(df, validate_clean, quarantine_dir)

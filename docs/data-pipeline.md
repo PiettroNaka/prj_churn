@@ -44,6 +44,7 @@ a pior das combinações.
 | **`coerce=True` mascara sujeira** | `coerce=True`, como o encontro declara — e o antídoto é validar duas vezes: o que a coerção esconde no cru, o schema do limpo cobra num tipo já definido |
 | **categoria nova quebra o `isin`** | alerta nas colunas de catálogo (`InternetService`, `PaymentMethod`), erro no resto. Um meio de pagamento novo não pode derrubar o pipeline; um `Contract` novo — a feature nº 1 do modelo — tem de parar |
 | **onde validar** | na fronteira: ao ler o CSV, e de novo antes das features |
+| **o que fazer com o lote ruim** | falhar cedo, logar os `failure_cases` e **quarentenar** — `artifacts/quarentena/<timestamp>/` guarda as linhas e o relatório |
 
 ## O DATA como artefato — o bloco fechado (Encontro 5)
 
@@ -92,3 +93,4 @@ diferença entre eles é rastreável até o md5 do CSV que os gerou.
 | **esquecer o `dvc push`** | o Git fica com o ponteiro e os bytes não sobem. `scripts/fetch_data.sh` cobre o buraco reconstruindo o dado do histórico, e um teste checa que o CSV no disco bate com o ponteiro |
 | **cache vs workspace** | `scripts/alternar_versao.sh` nunca troca só o ponteiro: sincroniza o dado e confere o md5 no fim |
 | **primeiro `add` é lento** | uma vez só, e neste dataset (1 MB) nem aparece |
+| **o dado no deploy** | `Dockerfile.dados` faz `dvc pull` para o volume; a imagem de treino nunca vê o DVC nem carrega os bytes |

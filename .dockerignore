@@ -8,9 +8,13 @@ __pycache__/
 # dados e artefatos entram por volume, nunca pelo build
 data/
 artifacts/
+# ...exceto o ponteiro: a imagem de dados (Dockerfile.dados) precisa saber o que
+# buscar. São ~100 bytes; os 995 KB continuam de fora.
+!data/*.dvc
 
-# metadados e cache do DVC: o container recebe o dado pronto, por volume
-.dvc/
-*.dvc
+# do DVC entra só a config (o endereço do remote). O cache é enorme e é
+# exatamente o que não pode virar camada de imagem.
+.dvc/cache/
+.dvc/tmp/
 
 .env

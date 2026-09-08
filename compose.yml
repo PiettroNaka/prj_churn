@@ -1,8 +1,23 @@
 # docker compose up  →  substitui a linha gigante de flags do docker run.
 # No Bloco 3 o Airflow inteiro sobe por um arquivo assim.
 services:
+  # Encontro 5: o dado entra por `dvc pull`, não pela imagem. Roda até o fim e
+  # sai; o treino só começa depois que ele terminou bem.
+  dados:
+    build:
+      context: .
+      dockerfile: Dockerfile.dados
+    volumes:
+      - ./data:/app/data
+      # o remote do DVC, montado onde o ../../dvc-storage da config aponta
+      - ../dvc-storage:/dvc-storage
+    command: pull
+
   treino:
     build: .
+    depends_on:
+      dados:
+        condition: service_completed_successfully
     volumes:
       # bind mounts: edita no host, roda dentro do container, sem rebuild
       - ./src:/app/src

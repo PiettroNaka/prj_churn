@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # saída
     artifact_path: Path = Path("artifacts/churn_model.pkl")
+    quarantine_dir: Path = Path("artifacts/quarentena")
 
 
 settings = Settings()

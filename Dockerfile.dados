@@ -1,0 +1,30 @@
+# Encontro 5 — a imagem que BUSCA o dado, para o dado não vir dentro da imagem.
+#
+# O slide pede "dvc pull no deploy". Instalar o DVC na imagem de treino
+# resolveria, e custaria caro: ela dobraria de tamanho por causa de uma
+# ferramenta que o treino não usa — o atrito nº 3 do Encontro 3. Então o pull é
+# um serviço à parte: esta imagem tem o DVC e o ponteiro, escreve o CSV no
+# volume compartilhado, e sai. A de treino continua enxuta e só encontra o dado
+# lá, montado.
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+
+ENV UV_LINK_MODE=copy
+WORKDIR /app
+
+# Só o grupo `data` (o dvc). Nem pandas, nem sklearn: esta imagem não treina.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project --only-group data
+
+# O que o DVC precisa para saber o que buscar e de onde: a config e o ponteiro.
+# Os bytes, não — são justamente o que ele vai buscar.
+COPY .dvc/config ./.dvc/
+COPY data/churn.csv.dvc ./data/
+
+# Não há .git aqui dentro, e nem faz sentido haver: a imagem é o deploy, não o
+# repositório. Sem isto o DVC recusa a rodar por não achar o SCM.
+RUN uv run --frozen --no-sync dvc config --local core.no_scm true
+
+# O remote é `../../dvc-storage` relativo a /app/.dvc/config, ou seja
+# /dvc-storage — o ponto de montagem do remote (ver compose.yml).
+ENTRYPOINT ["uv", "run", "--frozen", "--no-sync", "dvc"]
+CMD ["pull"]

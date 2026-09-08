@@ -43,6 +43,36 @@ jobs:
           ./scripts/alternar_versao.sh v1
           ./scripts/alternar_versao.sh v2
 
+      # Slide 13 do Encontro 5: "o dado vem por dvc pull". Aqui isso é provado, não
+      # afirmado — o remote é semeado pelo próprio DVC dentro do container
+      # (commit + push numa execução só, porque o cache morre com o --rm), o CSV
+      # é apagado, e um container novo tem de trazê-lo de volta do remote.
+      - name: Deploy — o dado vem por dvc pull, não pela imagem
+        run: |
+          docker build -f Dockerfile.dados -t churn-dados:0.1 .
+          docker images churn-dados:0.1 --format "imagem de dados: {{.Size}}"
+          mkdir -p "$PWD/../dvc-storage"
+
+          dvc() {
+            docker run --rm \
+              -v "$PWD/data:/app/data" \
+              -v "$PWD/../dvc-storage:/dvc-storage" \
+              "$@"
+          }
+
+          dvc --entrypoint sh churn-dados:0.1 -c \
+            'uv run --frozen --no-sync dvc commit -f data/churn.csv.dvc \
+             && uv run --frozen --no-sync dvc push'
+
+          rm data/churn.csv
+          test ! -f data/churn.csv
+
+          dvc churn-dados:0.1 pull
+
+          esperado=$(sed -n 's/^[[:space:]-]*md5:[[:space:]]*\([0-9a-f]\{32\}\).*/\1/p' \
+            data/churn.csv.dvc | head -1)
+          echo "$esperado  data/churn.csv" | md5sum -c -
+
       # Checkpoint do Encontro 4: o dado adulterado de propósito tem de reprovar.
       # scripts/ não entra na imagem (só src/); entra por volume, como os dados.
       - name: Quebra proposital (o contrato tem de pegar)

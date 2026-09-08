@@ -37,7 +37,7 @@ def save_artifact(model: RandomForestClassifier, encoder: CategoricalEncoder, pa
 def train(cfg: Settings = settings) -> tuple[RandomForestClassifier, dict[str, float]]:
     """Executa o pipeline: dados -> features -> split -> encode -> treino -> avaliação."""
     frame = add_derived_features(
-        load_clean(cfg.data_path, cfg.id_column, cfg.target)
+        load_clean(cfg.data_path, cfg.id_column, cfg.target, cfg.quarantine_dir)
     )
     features, labels = split_features_target(frame, cfg.target, cfg.positive_label)
 

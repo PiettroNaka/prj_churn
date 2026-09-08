@@ -12,6 +12,7 @@ prj_churn/
 │  ├─ config.py      # Settings (Pydantic) — caminhos, hiperparâmetros
 │  ├─ schema.py      # ChurnSchema — o contrato dos dados (pandera)
 │  ├─ validation.py  # executa o contrato e traduz a falha
+│  ├─ quarentena.py  # separa o lote reprovado em vez de treinar com ele
 │  ├─ data.py        # carga + validação + limpeza
 │  ├─ features.py    # transformações puras + encoder sem vazamento
 │  ├─ model.py       # treino (entrypoint)
@@ -20,6 +21,7 @@ prj_churn/
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
 ├─ scripts/          # fetch_data.sh · profiling · quebra_proposital · gerar_v2 · alternar_versao
 ├─ docs/             # nota de leitura do Data Pipeline
+├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
 ├─ .dvc/             # config do DVC: remote e cache
 └─ pyproject.toml    # deps travadas (uv)
@@ -63,6 +65,11 @@ Ou, sem decorar flags:
 docker compose up
 ```
 
+O `compose up` sobe dois serviços: `dados` busca o CSV com `dvc pull` (imagem
+`Dockerfile.dados`, que tem o DVC e o ponteiro, mas não os bytes) e, só quando
+ele termina bem, `treino` roda. O dado nunca é camada de imagem — nem da imagem
+de treino, que segue enxuta, sem DVC dentro.
+
 ## Validação de dados (Encontro 4)
 
 O contrato do dataset é declarativo e executável. Ele é uma **classe** —
@@ -91,12 +98,21 @@ Falha levanta `DataValidationError` (que é um `ValueError`) em modo `lazy` — 
 relatório traz **todas** as violações de uma vez, não só a primeira, e vem
 também estruturado em `erro.failure_cases` (coluna, regra, valor) para logar.
 
+São as três ações que o encontro pede diante de um lote ruim: **falhar cedo**
+(antes do treino, não depois da métrica cair), **logar os `failure_cases`** e
+**quarentenar o lote** — `artifacts/quarentena/<timestamp>/` guarda as linhas
+ofensivas e o relatório. Quarentena não substitui a falha; ela existe porque
+relatório sobre um arquivo que já foi embora não conserta nada. Quem escreve é a
+orquestração (`load_clean`), não o validador: `validate_raw` e `validate_clean`
+respondem se o dado serve, sem tocar em disco.
+
 ### Conhecer antes de validar
 
 As faixas saem do profiling, não de chute:
 
 ```bash
-uv run python scripts/profiling.py     # observado vs. o que o contrato exige
+uv run python scripts/profiling.py            # observado vs. o que o contrato exige
+uv run python scripts/profiling.py --html     # + o relatório completo do ydata-profiling
 ```
 
 ```
@@ -109,6 +125,13 @@ MonthlyCharges       18.25    118.75     68.68   > 0 e ≤ 200.0
 relação TotalCharges ≈ tenure × MonthlyCharges (tenure > 1):
   desvio mediano 1.5%, máximo 3.0%  — contrato tolera 10%
 ```
+
+O `--html` gera o relatório completo do encontro (correlações, alertas,
+distribuições) em `artifacts/profiling.html`. O `ydata-profiling` **não** está no
+`pyproject.toml` de propósito: como dependência do projeto ele puxa numpy e scipy
+para versões mais antigas, e o lock é único — uma ferramenta de relatório passaria
+a ditar a pilha numérica do treino, justo o que os Encontros 2 e 3 travaram. Ele
+roda em ambiente efêmero (`uvx`), sem encostar no ambiente travado.
 
 A faixa de `MonthlyCharges` é a do encontro — 18–119, o observado arredondado
 para fora. É uma faixa colada no dado: pega `999`, `-1` e `1e6`, e também
@@ -282,6 +305,29 @@ Para um remote de verdade, uma linha resolve — o resto do fluxo não muda:
 uv run dvc remote add -d storage s3://meu-bucket/churn   # ou gdrive://, azure://, ssh://
 uv run dvc remote modify --local storage ...             # credenciais em .dvc/config.local (não versionado)
 ```
+
+### O deploy: o dado vem por `dvc pull`
+
+`Dockerfile.dados` é uma imagem com o DVC e o ponteiro — sem os bytes. Ela roda
+`dvc pull`, escreve o CSV no volume compartilhado e sai; a imagem de treino,
+enxuta e sem DVC dentro, encontra o dado montado. É o `docker compose up`:
+
+```yaml
+dados:   # roda primeiro, busca o dado
+  build: {dockerfile: Dockerfile.dados}
+  volumes: [./data:/app/data, ../dvc-storage:/dvc-storage]
+  command: pull
+treino:
+  depends_on: {dados: {condition: service_completed_successfully}}
+```
+
+O remote é montado em `/dvc-storage` porque é para lá que o `../../dvc-storage`
+da config aponta, visto de `/app/.dvc/config`. Dentro da imagem não há `.git` —
+ela é o deploy, não o repositório — então o build liga `core.no_scm`.
+
+O CI prova o caminho inteiro em vez de afirmá-lo: semeia o remote com o próprio
+DVC dentro do container, **apaga** `data/churn.csv`, e um container novo tem de
+trazê-lo de volta do remote com o md5 batendo com o ponteiro.
 
 ### E quem clona hoje?
 
