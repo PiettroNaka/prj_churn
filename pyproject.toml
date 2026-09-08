@@ -13,6 +13,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+data = [
+    "dvc>=3.55",
+]
 dev = [
     "pytest>=8.0",
 ]

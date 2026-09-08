@@ -4,7 +4,9 @@ name: docker
 
 on:
   push:
-    branches: [main]
+    # As branches de trabalho também: um entregável que nunca passou pelo CI é
+    # um entregável verificado só na máquina de quem escreveu.
+    branches: [main, 'claude/**', 'feat/**']
   pull_request:
 
 jobs:
@@ -12,6 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # O CSV saiu do Git no Encontro 5 (DVC). Sem remote acessível aqui,
+          # scripts/fetch_data.sh recupera os bytes do blob anterior ao DVC —
+          # e blob antigo exige histórico completo, não o clone raso padrão.
+          fetch-depth: 0
 
       - name: Build da imagem
         run: docker build -t churn:0.1 .
@@ -23,12 +30,62 @@ jobs:
       - name: Tamanho da imagem
         run: docker images churn:0.1 --format "{{.Repository}}:{{.Tag}} {{.Size}}"
 
+      # Materializa o dado rastreado pelo DVC e, de quebra, confere o ponteiro:
+      # o script só termina bem se o md5 do arquivo bater com data/churn.csv.dvc.
+      - name: Materializa o dataset (DVC)
+        run: ./scripts/fetch_data.sh
+
+      # Checkpoint do Encontro 5: registrar duas versões não basta — tem de dar
+      # para alternar entre elas, e o dado tem de seguir o ponteiro. O script
+      # falha se o md5 do CSV não bater com o do .dvc depois da troca.
+      - name: Alterna entre as duas versões do dado
+        run: |
+          ./scripts/alternar_versao.sh v1
+          ./scripts/alternar_versao.sh v2
+
+      # Slide 13 do Encontro 5: "o dado vem por dvc pull". Aqui isso é provado, não
+      # afirmado — o remote é semeado pelo próprio DVC dentro do container
+      # (commit + push numa execução só, porque o cache morre com o --rm), o CSV
+      # é apagado, e um container novo tem de trazê-lo de volta do remote.
+      - name: Deploy — o dado vem por dvc pull, não pela imagem
+        run: |
+          docker build -f Dockerfile.dados -t churn-dados:0.1 .
+          docker images churn-dados:0.1 --format "imagem de dados: {{.Size}}"
+          mkdir -p "$PWD/../dvc-storage"
+
+          dvc() {
+            docker run --rm \
+              -v "$PWD/data:/app/data" \
+              -v "$PWD/../dvc-storage:/dvc-storage" \
+              "$@"
+          }
+
+          dvc --entrypoint sh churn-dados:0.1 -c \
+            'uv run --frozen --no-sync dvc commit -f data/churn.csv.dvc \
+             && uv run --frozen --no-sync dvc push'
+
+          rm data/churn.csv
+          test ! -f data/churn.csv
+
+          dvc churn-dados:0.1 pull
+
+          esperado=$(sed -n 's/^[[:space:]-]*md5:[[:space:]]*\([0-9a-f]\{32\}\).*/\1/p' \
+            data/churn.csv.dvc | head -1)
+          echo "$esperado  data/churn.csv" | md5sum -c -
+
+      # Checkpoint do Encontro 4: o dado adulterado de propósito tem de reprovar.
+      # scripts/ não entra na imagem (só src/); entra por volume, como os dados.
+      - name: Quebra proposital (o contrato tem de pegar)
+        run: |
+          docker run --rm \
+            -v "$PWD/data:/app/data" \
+            -v "$PWD/scripts:/app/scripts" \
+            churn:0.1 uv run python scripts/quebra_proposital.py
+
       # O checkpoint do Encontro 3 é o treino rodando DENTRO do container, com o
-      # dataset entrando por volume. data/churn.csv não é versionado (DVC vem no
-      # Encontro 5), então este passo só roda quando o CSV está presente no
-      # checkout — numa branch de verificação, ou depois que o DVC entrar.
+      # dataset entrando por volume — e continua rodando depois do DVC, agora com
+      # o dado vindo do ponteiro em vez de vir do Git.
       - name: Treino no container (dados via volume)
-        if: hashFiles('data/churn.csv') != ''
         run: |
           mkdir -p artifacts
           docker run --rm \
@@ -39,7 +96,6 @@ jobs:
           ls -lh artifacts/
 
       - name: Publica o modelo treinado
-        if: hashFiles('data/churn.csv') != ''
         uses: actions/upload-artifact@v7
         with:
           name: churn-model
