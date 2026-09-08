@@ -1,3 +1,8 @@
 # Add patterns of files dvc should ignore, which could improve
 # the performance. Learn more at
 # https://dvc.org/doc/user-guide/dvcignore
+
+# bytecode não é código-fonte: sem isto o hash de src/churn muda a cada execução
+# e o `dvc repro` acha que o modelo ficou velho sem nada ter mudado.
+__pycache__/
+*.pyc

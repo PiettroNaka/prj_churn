@@ -1,0 +1,19 @@
+# O pipeline como código — Encontro 5.
+#
+# O `dvc add` versiona o dado; isto versiona a RELAÇÃO entre dado, código e
+# modelo. Cada `dvc repro` grava no dvc.lock o hash exato de tudo o que entrou e
+# do que saiu — é a cadeia dados → código → modelo, escrita por quem a executou.
+#
+#   dvc repro          roda só o que mudou (deps com hash diferente)
+#   dvc repro -f       força, mesmo sem mudança
+#   dvc dag            desenha as dependências
+stages:
+  treino:
+    cmd: uv run python -m churn.model
+    deps:
+      # trocar de versão do dado (scripts/alternar_versao.sh) muda este hash,
+      # e é o que faz o DVC saber que o modelo ficou velho
+      - data/churn.csv
+      - src/churn
+    outs:
+      - artifacts/churn_model.pkl

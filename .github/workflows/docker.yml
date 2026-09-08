@@ -33,6 +33,14 @@ jobs:
       - name: Materializa o dataset (DVC)
         run: ./scripts/fetch_data.sh
 
+      # Checkpoint do Encontro 5: registrar duas versões não basta — tem de dar
+      # para alternar entre elas, e o dado tem de seguir o ponteiro. O script
+      # falha se o md5 do CSV não bater com o do .dvc depois da troca.
+      - name: Alterna entre as duas versões do dado
+        run: |
+          ./scripts/alternar_versao.sh v1
+          ./scripts/alternar_versao.sh v2
+
       # Checkpoint do Encontro 4: o dado adulterado de propósito tem de reprovar.
       # scripts/ não entra na imagem (só src/); entra por volume, como os dados.
       - name: Quebra proposital (o contrato tem de pegar)

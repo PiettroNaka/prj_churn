@@ -1,7 +1,7 @@
 # data/
 
 `churn.csv` — Telco Customer Churn com os identificadores regenerados pelo
-professor. 7043 linhas × 21 colunas, 981 KB.
+professor. 21 colunas, em duas versões registradas.
 
 ## Quem versiona este diretório
 
@@ -27,19 +27,28 @@ dvc pull                  # o caminho normal, quando o remote está configurado
 O script confere o md5 do que materializou contra o `.dvc`. Se não bater, ele
 falha — dado silenciosamente diferente é pior que dado ausente.
 
+## As duas versões
+
+| | clientes | bytes | md5 |
+|---|---|---|---|
+| **v1** | 7043 | 981.685 | `d390bd07b5514a2256a2396993b8b0e3` |
+| **v2** | 7143 | 995.054 | `f150a64ab5537f24b16770ba76ad7b95` |
+
+A v1 é o arquivo como veio da aula. Confere byte a byte com o distribuído pelo
+professor: `sha256 1b90d77671ab4d396b1bd403eadd764d8457aec50467ad99f586eaabf9304596`.
+
+A v2 é a v1 mais 100 clientes, produzida por `scripts/gerar_v2.py` — sorteio com
+semente fixa, linhas copiadas byte a byte, identificador novo. Reproduzível:
+quem tem a v1 e o script chega nos mesmos 995.054 bytes. (A v2 do professor tem
+md5 `49f0efac…`; aqueles 100 clientes são o arquivo dele, e não este.)
+
+Alternar entre elas: `./scripts/alternar_versao.sh v1` (ou `v2`).
+
 ## Bytes preservados
 
 `.gitattributes` marca `data/*.csv` como `-text` para o Git nunca converter
 LF↔CRLF: o hash tem de ser o mesmo no Windows e no Linux, senão o `dvc status`
 acusaria mudança onde não houve.
-
-```
-md5     d390bd07b5514a2256a2396993b8b0e3   (é o que está no .dvc)
-sha256  1b90d77671ab4d396b1bd403eadd764d8457aec50467ad99f586eaabf9304596
-```
-
-O DVC usa md5; o sha256 fica registrado porque é o que foi conferido em aula
-contra o arquivo distribuído pelo professor.
 
 ## Contrato
 

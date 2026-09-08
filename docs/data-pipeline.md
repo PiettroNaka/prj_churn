@@ -45,12 +45,50 @@ a pior das combinações.
 | **categoria nova quebra o `isin`** | alerta nas colunas de catálogo (`InternetService`, `PaymentMethod`), erro no resto. Um meio de pagamento novo não pode derrubar o pipeline; um `Contract` novo — a feature nº 1 do modelo — tem de parar |
 | **onde validar** | na fronteira: ao ler o CSV, e de novo antes das features |
 
-## O DATA como artefato — a ponte para o Encontro 5
+## O DATA como artefato — o bloco fechado (Encontro 5)
 
-Depois de validado, o dado deixa de ser arquivo solto: tem **contrato** (o
-schema versionado), tem **linhagem** (qual dado gerou qual modelo) e é
-**reproduzível**. Faltava a versão — é o buraco que o DVC fecha no Encontro 5, e
-que neste repositório já está fechado: `data/churn.csv.dvc`.
+Depois de validado, o dado deixa de ser arquivo solto: tem **contrato** (o schema
+versionado) e é **reproduzível**. Faltava a versão, e é o que o DVC fecha.
 
 O ponteiro e o schema respondem perguntas diferentes: o `.dvc` diz *qual* dado é
-este; o schema diz se ele *serve*.
+este; o schema diz se ele *serve*. Um dataset novo passa no schema e muda o md5;
+um corrompido mantém o md5 de nada e reprova no schema.
+
+### Por que o Git não serve para dados
+
+| Git | é ótimo para | é péssimo para |
+|---|---|---|
+| formato | texto, arquivos pequenos | binário, MB/GB |
+| diff | linha a linha, legível | "um blob mudou" |
+| histórico | leve | cada versão incha o repositório, para sempre |
+
+O truque do DVC é não escolher: o Git versiona um ponteiro de ~100 bytes com o
+hash do conteúdo, e os bytes vivem no cache e no remote, endereçados por esse
+hash (`files/md5/f1/50a64ab5537f24…`).
+
+### A cadeia dados → código → modelo
+
+```
+DADO                  CÓDIGO                MODELO
+churn.csv @ v2   →    src/churn + schema →  artifacts/churn_model.pkl
+md5 f150a64a          commit 523c40e        md5 008a388f
+```
+
+Quem amarra as duas primeiras pontas é o commit: ele carrega o código **e** o
+ponteiro do dado. Por isso "qual dado gerou qual modelo?" passa a ter uma
+resposta — é o commit. A terceira ponta é o `dvc.lock`, que grava o hash exato
+de cada entrada e da saída a cada `dvc repro`; o MLflow (Enc. 6) e o Model
+Registry (Enc. 7) fazem o mesmo pelo lado do modelo.
+
+Concretamente, neste repositório: a v1 (7043 clientes) treina um modelo com
+accuracy 0,7570 e a v2 (7143) chega a 0,7609. Duas acurácias, dois modelos — e a
+diferença entre eles é rastreável até o md5 do CSV que os gerou.
+
+### Os atritos do Encontro 5
+
+| Atrito | O que fizemos |
+|---|---|
+| **config de remote** | remote local (`../dvc-storage`), como o encontro recomenda para começar; trocar por S3 é uma linha de `dvc remote add` |
+| **esquecer o `dvc push`** | o Git fica com o ponteiro e os bytes não sobem. `scripts/fetch_data.sh` cobre o buraco reconstruindo o dado do histórico, e um teste checa que o CSV no disco bate com o ponteiro |
+| **cache vs workspace** | `scripts/alternar_versao.sh` nunca troca só o ponteiro: sincroniza o dado e confere o md5 no fim |
+| **primeiro `add` é lento** | uma vez só, e neste dataset (1 MB) nem aparece |

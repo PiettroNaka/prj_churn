@@ -18,8 +18,9 @@ prj_churn/
 │  └─ evaluate.py    # métricas
 ├─ tests/            # pytest
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
-├─ scripts/          # fetch_data.sh · profiling.py · quebra_proposital.py
+├─ scripts/          # fetch_data.sh · profiling · quebra_proposital · gerar_v2 · alternar_versao
 ├─ docs/             # nota de leitura do Data Pipeline
+├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
 ├─ .dvc/             # config do DVC: remote e cache
 └─ pyproject.toml    # deps travadas (uv)
 ```
@@ -199,8 +200,71 @@ uv run dvc push        # manda para o remote o que você acabou de rastrear
 
 Ciclo de troca de dataset: substitua `data/churn.csv`, rode `dvc add
 data/churn.csv` (o `.dvc` muda), `dvc push` (os bytes sobem) e commite o `.dvc`.
-Git e DVC andam juntos — `git checkout` de um commit antigo seguido de `dvc
-checkout` devolve o dado daquele commit.
+
+### Duas versões registradas
+
+| | clientes | md5 | accuracy | roc_auc |
+|---|---|---|---|---|
+| **v1** | 7043 | `d390bd07…` | 0,7570 | 0,8053 |
+| **v2** | 7143 | `f150a64a…` | 0,7609 | 0,8150 |
+
+A v2 é a v1 mais 100 clientes, e não é um arquivo que alguém precise guardar:
+`scripts/gerar_v2.py` sorteia 100 clientes existentes com semente fixa e os
+recadastra com identificador novo, copiando o resto da linha byte a byte. Daí
+saem duas propriedades — a v2 já nasce cumprindo o contrato do Encontro 4, e os
+bytes são os mesmos em qualquer máquina.
+
+As métricas mudam entre as duas. É exatamente a pergunta do encontro: *dois
+modelos, duas acurácias — qual CSV gerou qual?* A resposta agora é o commit, que
+carrega código e ponteiro juntos.
+
+### Alternar entre elas
+
+São dois movimentos, e essa é a parte que costuma escapar:
+
+```bash
+git checkout <commit> -- data/churn.csv.dvc   # o Git traz o PONTEIRO
+uv run dvc checkout                           # o DVC traz os BYTES
+```
+
+O Git sozinho troca 100 bytes de texto: sem o segundo comando o CSV no disco
+ainda é o da versão anterior, e o repositório passa a mentir sobre qual dado
+está ali (`dvc status` acusa). O script faz os dois e confere o md5 no fim:
+
+```bash
+./scripts/alternar_versao.sh v1     # 7043 clientes
+./scripts/alternar_versao.sh v2     # 7143 clientes
+```
+
+Ele acha o commit pelo hash do conteúdo, não por número de commit — que muda a
+cada rebase. O CI roda o ciclo inteiro (v1 → v2) a cada push: é o checkpoint do
+encontro virando teste.
+
+### O pipeline em `dvc.yaml`
+
+O `dvc add` versiona o dado; o `dvc.yaml` versiona a **relação** entre dado,
+código e modelo:
+
+```yaml
+stages:
+  treino:
+    cmd: uv run python -m churn.model
+    deps: [data/churn.csv, src/churn]
+    outs: [artifacts/churn_model.pkl]
+```
+
+```bash
+uv run dvc repro     # roda só o que mudou; grava o dvc.lock
+uv run dvc dag       # desenha as dependências
+```
+
+O `dvc.lock` guarda o hash exato de cada entrada e da saída — é a cadeia
+**dados → código → modelo** escrita por quem a executou. Trocar para a v1 muda o
+hash de `data/churn.csv`, e o `dvc repro` sabe sozinho que o modelo ficou velho.
+Sem mudança nenhuma ele não reexecuta nada (`Stage 'treino' didn't change`).
+
+O `.dvcignore` exclui `__pycache__/`: sem isso o hash de `src/churn` mudaria a
+cada execução e o `repro` reexecutaria o treino sem nada ter mudado.
 
 ### O remote
 
@@ -223,9 +287,11 @@ uv run dvc remote modify --local storage ...             # credenciais em .dvc/c
 
 Um remote local não viaja junto com o clone. Por isso existe
 `scripts/fetch_data.sh`: tenta `dvc pull` e, se não houver remote alcançável,
-recupera o CSV do blob que ficou no histórico do Git (o dataset esteve
-versionado até o Encontro 5) e **confere o md5 contra o `.dvc`**. É como o CI
-materializa o dado para rodar o treino no container.
+recupera a v1 do blob que ficou no histórico do Git (o dataset esteve versionado
+até o Encontro 5) e, se o ponteiro pedir a v2, roda `scripts/gerar_v2.py` para
+chegar nela. Em qualquer caminho **confere o md5 contra o `.dvc`**. É como o CI
+materializa o dado — sem DVC instalado e sem remote, só `git` e a biblioteca
+padrão do Python.
 
 ## O que mudou em relação ao `train_churn.py`
 
@@ -244,5 +310,6 @@ materializa o dado para rodar o treino no container.
 
 - **Enc. 3** ✓ — containerizado: `Dockerfile`, `.dockerignore` e `compose.yml`.
 - **Enc. 4** ✓ — contrato de dados com pandera (`schema.py`, `validation.py`).
-- **Enc. 5** ✓ — `data/` versionado com DVC (`data/churn.csv.dvc`, remote, `scripts/fetch_data.sh`).
+- **Enc. 5** ✓ — `data/` versionado com DVC: ponteiro, remote, duas versões com
+  alternância (`scripts/alternar_versao.sh`) e o pipeline em `dvc.yaml`.
 - **Enc. 6** — rastrear experimentos com MLflow.
