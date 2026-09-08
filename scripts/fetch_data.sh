@@ -4,12 +4,14 @@
 # Ordem de tentativa:
 #   1. já está no disco e bate com o hash rastreado  -> não faz nada
 #   2. `dvc pull`                                    -> o caminho normal
-#   3. blob do Git anterior ao Encontro 5            -> a rede de segurança
+#   3. blob do Git (v1) + scripts/gerar_v2.py        -> a rede de segurança
 #
 # O passo 3 existe porque o remote padrão é um diretório local (`../dvc-storage`):
 # quem clona o repositório numa máquina nova não tem esse diretório, e o CI muito
-# menos. Como o CSV esteve versionado no Git até o Encontro 5, os bytes continuam
-# no histórico — e o hash do .dvc é quem confirma que são os bytes certos.
+# menos. Como o CSV esteve versionado no Git até o Encontro 5, os bytes da v1
+# continuam no histórico; a v2 é a v1 mais 100 clientes gerados de forma
+# determinística, então ela também se reconstrói daqui. Em qualquer caminho, o
+# hash do .dvc é quem confirma que são os bytes certos.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -67,13 +69,28 @@ else
     echo "dvc pull não deixou o arquivo no lugar (remote indisponível?)."
 fi
 
-echo "Recuperando do histórico do Git (blob ${BLOB:0:7})..."
+echo "Recuperando a v1 do histórico do Git (blob ${BLOB:0:7})..."
 if git cat-file -e "$BLOB" 2>/dev/null; then
     git cat-file blob "$BLOB" > "$DATASET"
 else
     echo "ERRO: o blob $BLOB não está neste clone." >&2
     echo "      Num clone raso, rode: git fetch --unshallow" >&2
     exit 1
+fi
+
+# O ponteiro pode estar apontando para a v2. Ela é a v1 mais 100 clientes
+# gerados com semente fixa — reconstruir é rodar o gerador (só stdlib, sem
+# precisar do ambiente do projeto instalado).
+if ! confere; then
+    echo "O ponteiro não é o da v1; reconstruindo a v2..."
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "ERRO: preciso de python3 para rodar scripts/gerar_v2.py." >&2
+        exit 1
+    fi
+    python3 scripts/gerar_v2.py >/dev/null || {
+        echo "ERRO: scripts/gerar_v2.py falhou." >&2
+        exit 1
+    }
 fi
 
 if ! confere; then
@@ -84,5 +101,5 @@ if ! confere; then
     exit 1
 fi
 
-echo "$DATASET recuperado do histórico e conferido contra $DVC_FILE ($esperado)."
+echo "$DATASET reconstruído e conferido contra $DVC_FILE ($esperado)."
 echo "Dica: 'dvc push' manda esses bytes para o seu remote."

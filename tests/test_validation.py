@@ -269,6 +269,23 @@ def test_multiplas_linhas_sem_telefone(raw_frame):
 
 
 @pytest.mark.skipif(not DATASET.exists(), reason="data/churn.csv não versionado")
+def test_dataset_no_disco_bate_com_o_ponteiro_dvc():
+    """A lição do Encontro 5 como teste: o dado é o que o ponteiro diz que é.
+
+    Vale para qualquer versão em que o repositório esteja — o ``dvc checkout``
+    sincroniza os dois. Se falhar, alguém mexeu no CSV sem rodar ``dvc add``, e
+    o commit passou a mentir sobre qual dado gerou qual modelo.
+    """
+    import hashlib
+    import re
+
+    ponteiro = Path("data/churn.csv.dvc")
+    declarado = re.search(r"md5:\s*([0-9a-f]{32})", ponteiro.read_text()).group(1)
+
+    assert hashlib.md5(DATASET.read_bytes()).hexdigest() == declarado
+
+
+@pytest.mark.skipif(not DATASET.exists(), reason="data/churn.csv não versionado")
 def test_dataset_real_passa_nos_dois_schemas():
     from churn.data import coerce_total_charges, drop_identifier
 
