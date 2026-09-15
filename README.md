@@ -26,6 +26,7 @@ prj_churn/
 ├─ docs/             # nota de leitura do Data Pipeline
 ├─ ver-runs.bat      # Windows: duplo clique → o relatório dos runs
 ├─ abrir-mlflow.bat  # Windows: duplo clique → a UI do MLflow
+├─ atualizar.bat     # Windows: duplo clique → traz a versão nova, desenrosca o Git
 ├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
 ├─ mlflow.db         # tracking dos experimentos (gitignored)
