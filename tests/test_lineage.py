@@ -61,7 +61,7 @@ def test_sem_git_a_tag_diz_desconhecido(monkeypatch):
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="sem git neste ambiente")
-def test_git_commit_marca_arvore_suja(tmp_path):
+def test_git_commit_marca_codigo_nao_commitado(tmp_path):
     """Run treinado sobre código não commitado não pode apontar um hash limpo."""
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
@@ -76,9 +76,9 @@ def test_git_commit_marca_arvore_suja(tmp_path):
     try:
         os.chdir(tmp_path)
         limpo = git_commit()
-        assert limpo and not limpo.endswith("-sujo")
+        assert limpo and "+" not in limpo
 
         (tmp_path / "a.txt").write_text("dois", encoding="utf-8")
-        assert git_commit() == f"{limpo}-sujo"
+        assert git_commit() == f"{limpo}+alteracoes"
     finally:
         os.chdir(anterior)

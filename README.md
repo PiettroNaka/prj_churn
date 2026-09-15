@@ -421,9 +421,11 @@ quem sabe o commit informa: `CHURN_GIT_COMMIT` tem precedência, e o CI passa o
 no modelo que o CI produz. O DVC responde "qual dado e qual código"; o MLflow responde "qual experimento, com
 quais params e métricas"; a tag é o fio entre eles. Sem ponteiro `.dvc` por perto,
 `data_md5()` cai no md5 do próprio arquivo — mesma resposta, sem a garantia de
-que a versão está registrada. E `git_commit()` marca `-sujo` quando há mudança
-não commitada: um run treinado sobre código não commitado aponta para um commit
-que não contém aquele código, e a tag precisa dizer isso.
+que a versão está registrada. E `git_commit()` marca `+alteracoes` quando há
+mudança não commitada: um run treinado sobre código não commitado aponta para um
+commit que não contém aquele código, e a tag precisa dizer isso. (O Git chama
+esse estado de *dirty*; aqui "sujo" já é o dado fora do contrato do Encontro 4,
+então o marcador usa outra palavra de propósito.)
 
 O CI cobra esse fio a cada push (`scripts/conferir_run.py`): o run tem de existir,
 ter métricas, e a tag `data_md5` tem de bater com o md5 do ponteiro. Um modelo
