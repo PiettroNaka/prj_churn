@@ -367,6 +367,20 @@ Quem prefere container: `docker compose up mlflow`.
 > se misturam: as métricas aparecem nos dois casos, mas o link do artefato só
 > resolve no mundo em que o run nasceu. Escolha um e fique nele.
 
+**Duas coisas que confundem ao abrir a UI 3.16 pela primeira vez** — as duas
+custaram tempo aqui, então ficam registradas:
+
+- Ela **abre na aba GenAI** (traces, judges, playground), que não tem nada a ver
+  com este projeto e aparece vazia. Os runs estão em **"Model training"**, no
+  canto superior esquerdo, ou direto em `#/experiments/1/runs`.
+- As **colunas de métrica não vêm ligadas**. A tabela mostra só nome, data e
+  duração; para ver `roc_auc`, `accuracy` e as tags de linhagem, use o botão
+  **Columns**. Para ordenar sem clicar em nada, o endereço aceita os parâmetros:
+
+  ```
+  #/experiments/1/runs?orderByKey=metrics.roc_auc&orderByAsc=false
+  ```
+
 A telemetria do MLflow 3 (`config.mlflow-telemetry.io`) fica desligada por
 `MLFLOW_DISABLE_TELEMETRY` — num projeto de curso ela não serve para nada.
 
