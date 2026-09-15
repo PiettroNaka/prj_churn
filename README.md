@@ -22,7 +22,7 @@ prj_churn/
 │  └─ evaluate.py    # métricas
 ├─ tests/            # pytest
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
-├─ scripts/          # fetch_data · profiling · quebra_proposital · gerar_v2 · alternar_versao · conferir_run · prever · mlflow_ui
+├─ scripts/          # preparar (multiplataforma) · fetch_data · mlflow_ui · prever · profiling · gerar_v2 · alternar_versao · quebra_proposital · conferir_run
 ├─ docs/             # nota de leitura do Data Pipeline
 ├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
@@ -359,6 +359,9 @@ uv run python -m churn.model         # um run
 uv run python -m churn.experiments   # o grid: 9 runs
 ./scripts/mlflow_ui.sh               # a UI em localhost:5000
 ```
+
+No Windows, onde o PowerShell não roda `.sh`, o equivalente é
+`uv run python scripts/preparar.py` — mesmo caminho, só a biblioteca padrão.
 
 O `mlflow_ui.sh` faz o que falta antes de abrir: materializa o dataset se não
 estiver no disco, treina uma vez se ainda não houver run nenhum (UI vazia não

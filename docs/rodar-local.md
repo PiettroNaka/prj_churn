@@ -21,9 +21,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-> **Windows:** os scripts `.sh` **não** rodam no PowerShell nem no CMD. Use o
-> **Git Bash**, que vem junto com o Git for Windows (botão direito na pasta →
-> "Git Bash Here"). Todo o resto — `uv run …` — funciona em qualquer terminal.
+> **Windows:** os scripts `.sh` **não** rodam no PowerShell nem no CMD. Há dois
+> caminhos, e os dois funcionam:
+>
+> - **PowerShell mesmo**, com o equivalente em Python:
+>   `uv run python scripts/preparar.py` — faz dado + treino + UI de uma vez.
+> - **Git Bash** (vem com o Git for Windows: botão direito na pasta → "Git Bash
+>   Here"), onde os `.sh` rodam normalmente.
+>
+> Todo o resto — qualquer `uv run …` — funciona em qualquer terminal.
 
 ## 1. O código
 
@@ -111,18 +117,34 @@ uv run mlflow models serve -m runs:/<run_id>/model --env-manager local
 
 ## Tudo de uma vez
 
+**Linux, macOS ou Git Bash:**
+
 ```bash
 git clone https://github.com/PiettroNaka/prj_churn.git && cd prj_churn
 uv sync
 ./scripts/mlflow_ui.sh
 ```
 
+**Windows (PowerShell), sem depender de bash:**
+
+```powershell
+git clone https://github.com/PiettroNaka/prj_churn.git
+cd prj_churn
+uv sync
+uv run python scripts/preparar.py
+```
+
+`scripts/preparar.py` é o mesmo caminho dos dois scripts `.sh`, em Python puro:
+materializa o dataset (do DVC ou do histórico do Git), treina se não houver run
+e sobe a UI. `--porta 5001` troca a porta; `--so-dado` para depois do CSV.
+
 ## Quando der errado
 
 | Sintoma | O que é | Saída |
 |---|---|---|
 | `uv: command not found` | o instalador não entrou no PATH | feche e reabra o terminal, ou `source $HOME/.local/bin/env` |
-| `./scripts/…: command not found` (Windows) | PowerShell não roda `.sh` | use o **Git Bash** |
+| `./scripts/…` não é reconhecido (Windows) | PowerShell não roda `.sh` | `uv run python scripts/preparar.py`, ou abra o **Git Bash** |
+| `cd caminho/para/prj_churn` falha | `caminho/para` era um exemplo, não um caminho real | use a pasta onde você clonou; se o prompt já termina em `prj_churn`, você já está nela |
 | `Permission denied` ao rodar um script | bit de execução perdido no clone | `chmod +x scripts/*.sh` |
 | Porta 5000 ocupada no **macOS** | é o AirPlay Receiver, não outro MLflow | `./scripts/mlflow_ui.sh 5001`, ou desligue em Ajustes → Geral → AirDrop e Handoff |
 | UI abre vazia, sem run nenhum | banco novo, nada treinado ainda | `uv run python -m churn.model` |
