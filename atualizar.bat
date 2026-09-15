@@ -24,7 +24,9 @@ echo  ---------------------------------------------------------------
 echo.
 
 set RESPOSTA=
-set /p RESPOSTA="Continuar? (S para sim, qualquer outra tecla cancela) "
+REM as aspas envolvem VAR=texto inteiro, nao so o texto: e a forma que nao
+REM imprime as proprias aspas e ainda preserva o espaco no fim
+set /p "RESPOSTA=Continuar? (S para sim, qualquer outra tecla cancela) "
 if /i not "%RESPOSTA%"=="S" (
     echo.
     echo Cancelado. Nada foi alterado.
