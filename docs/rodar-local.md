@@ -98,6 +98,35 @@ então, na prática, ele sozinho cobre os passos 3 a 5.
    ordenado:
    `http://localhost:5000/#/experiments/1/runs?orderByKey=metrics.roc_auc&orderByAsc=false`
 
+## 5b. Se o navegador não abrir o `localhost`
+
+Máquina de trabalho com proxy, porta bloqueada, ou só vontade de não deixar
+servidor de pé. Tudo o que a UI mostra sai sem navegador:
+
+```bash
+uv run python scripts/relatorio.py           # a tabela no terminal
+uv run python scripts/relatorio.py --html    # artifacts/runs.html
+```
+
+O HTML é um arquivo só, sem CSS nem JS de fora: abre com **duplo clique**, por
+`file://` — sem porta, sem rede, sem servidor.
+
+```
+run            roc_auc  accuracy  n_estim.  max_depth  dado (md5)   código
+rf-n500-d8     0.8220   0.7749    500       8          f150a64ab5…  d7ee6e5
+rf             0.8150   0.7609    200       None       f150a64ab5…  b4912fd
+```
+
+Antes de desistir da UI, porém, vale conferir **se o servidor está mesmo no ar** —
+`ERR_CONNECTION_REFUSED` quase sempre é isso, não bloqueio:
+
+```powershell
+curl.exe http://127.0.0.1:5000     # 200 = no ar;  refused = não subiu
+```
+
+E tente `127.0.0.1:5000` no lugar de `localhost:5000`: alguns proxies corporativos
+tratam os dois de forma diferente.
+
 ## 6. Rodar o modelo
 
 ```bash
