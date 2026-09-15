@@ -87,13 +87,30 @@ jobs:
       # o dado vindo do ponteiro em vez de vir do Git.
       - name: Treino no container (dados via volume)
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts mlruns
           docker run --rm \
+            -e CHURN_MLFLOW_TRACKING_URI=sqlite:////app/mlruns/mlflow.db \
+            -e CHURN_GIT_COMMIT="$GITHUB_SHA" \
             -v "$PWD/data:/app/data" \
             -v "$PWD/artifacts:/app/artifacts" \
+            -v "$PWD/mlruns:/app/mlruns" \
             churn:0.1
           echo "--- artefato gerado no host, via volume ---"
           ls -lh artifacts/
+
+      # Checkpoint do Encontro 6: o treino tem de deixar rastro, e o rastro tem
+      # de apontar para o dado certo. Confere que o run existe e que a tag
+      # data_md5 bate com o md5 do ponteiro do DVC — a cadeia fechando.
+      - name: O run do MLflow registrou a linhagem
+        run: |
+          esperado=$(sed -n 's/^[[:space:]-]*md5:[[:space:]]*\([0-9a-f]\{32\}\).*/\1/p' \
+            data/churn.csv.dvc | head -1)
+          docker run --rm \
+            -e CHURN_MLFLOW_TRACKING_URI=sqlite:////app/mlruns/mlflow.db \
+            -e ESPERADO="$esperado" \
+            -v "$PWD/mlruns:/app/mlruns" \
+            -v "$PWD/scripts:/app/scripts" \
+            churn:0.1 uv run python scripts/conferir_run.py
 
       - name: Publica o modelo treinado
         uses: actions/upload-artifact@v7
