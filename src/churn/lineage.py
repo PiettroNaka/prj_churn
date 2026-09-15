@@ -13,10 +13,16 @@ tag é o fio que liga os três.
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
 import yaml
+
+#: De onde o commit vem quando não há repositório por perto. É o caso do
+#: container: ele carrega o código, não o .git. Quem sabe o commit ali é quem
+#: construiu a imagem ou disparou o job — daí a variável.
+ENV_COMMIT = "CHURN_GIT_COMMIT"
 
 #: Valor das tags quando a resposta não existe naquele ambiente (um container
 #: sem .git, por exemplo). Preenchido de propósito em vez de omitido: tag
@@ -54,7 +60,15 @@ def git_commit() -> str:
     O sufixo não é preciosismo: um run treinado em cima de código não commitado
     aponta para um commit que não contém aquele código. Melhor a tag dizer isso
     do que mentir com um hash limpo.
+
+    ``CHURN_GIT_COMMIT`` tem precedência: dentro do container não há ``.git``, e
+    sem ela a metade "qual código" da linhagem ficaria em branco justamente no
+    modelo que o CI produz. O ambiente que sabe informa.
     """
+    do_ambiente = os.environ.get(ENV_COMMIT, "").strip()
+    if do_ambiente:
+        return do_ambiente[:7]
+
     try:
         commit = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],

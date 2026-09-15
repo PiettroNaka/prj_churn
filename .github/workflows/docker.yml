@@ -90,6 +90,7 @@ jobs:
           mkdir -p artifacts mlruns
           docker run --rm \
             -e CHURN_MLFLOW_TRACKING_URI=sqlite:////app/mlruns/mlflow.db \
+            -e CHURN_GIT_COMMIT="$GITHUB_SHA" \
             -v "$PWD/data:/app/data" \
             -v "$PWD/artifacts:/app/artifacts" \
             -v "$PWD/mlruns:/app/mlruns" \

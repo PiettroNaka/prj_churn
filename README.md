@@ -376,8 +376,11 @@ data_md5   f150a64ab5537f24b16770ba76ad7b95   ← o ponteiro .dvc (Encontro 5)
 git_commit d7ee6e5                            ← o commit do código
 ```
 
-`src/churn/lineage.py` lê as duas respostas e o treino as grava como tags. O DVC
-responde "qual dado e qual código"; o MLflow responde "qual experimento, com
+`src/churn/lineage.py` lê as duas respostas e o treino as grava como tags. Dentro
+do container não há `.git` — a imagem carrega o código, não o repositório —, então
+quem sabe o commit informa: `CHURN_GIT_COMMIT` tem precedência, e o CI passa o
+`GITHUB_SHA` do job. Sem isso, a metade "qual código" ficaria em branco justamente
+no modelo que o CI produz. O DVC responde "qual dado e qual código"; o MLflow responde "qual experimento, com
 quais params e métricas"; a tag é o fio entre eles. Sem ponteiro `.dvc` por perto,
 `data_md5()` cai no md5 do próprio arquivo — mesma resposta, sem a garantia de
 que a versão está registrada. E `git_commit()` marca `-sujo` quando há mudança
