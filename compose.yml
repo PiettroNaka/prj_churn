@@ -13,6 +13,25 @@ services:
       - ../dvc-storage:/dvc-storage
     command: pull
 
+  # A UI dos experimentos: docker compose up mlflow  ->  localhost:5000
+  # Atenção ao mundo: o caminho dos artefatos é gravado ABSOLUTO no banco. Runs
+  # criados no host (artefatos em <repo>/mlruns) e runs criados em container
+  # (/app/mlruns) não se misturam — as métricas aparecem nos dois casos, mas o
+  # link do artefato só resolve no mundo em que o run nasceu. Escolha um.
+  mlflow:
+    build: .
+    environment:
+      MLFLOW_DISABLE_TELEMETRY: "true"
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+    command: >
+      uv run mlflow ui
+      --backend-store-uri sqlite:////app/mlruns/mlflow.db
+      --host 0.0.0.0 --port 5000
+      --allowed-hosts localhost,127.0.0.1,localhost:5000,127.0.0.1:5000
+
   treino:
     build: .
     depends_on:

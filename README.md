@@ -22,7 +22,7 @@ prj_churn/
 │  └─ evaluate.py    # métricas
 ├─ tests/            # pytest
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
-├─ scripts/          # fetch_data · profiling · quebra_proposital · gerar_v2 · alternar_versao · conferir_run · prever
+├─ scripts/          # fetch_data · profiling · quebra_proposital · gerar_v2 · alternar_versao · conferir_run · prever · mlflow_ui
 ├─ docs/             # nota de leitura do Data Pipeline
 ├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
@@ -352,10 +352,23 @@ vira um **run**: o que foi escolhido, o que foi medido, o modelo e — a parte q
 fecha o bloco anterior — de qual dado e de qual código aquilo saiu.
 
 ```bash
-uv run python -m churn.model                              # um run
-uv run python -m churn.experiments                        # o grid: 9 runs
-uv run mlflow ui --backend-store-uri sqlite:///mlflow.db  # localhost:5000
+uv run python -m churn.model         # um run
+uv run python -m churn.experiments   # o grid: 9 runs
+./scripts/mlflow_ui.sh               # a UI em localhost:5000
 ```
+
+O `mlflow_ui.sh` faz o que falta antes de abrir: materializa o dataset se não
+estiver no disco, treina uma vez se ainda não houver run nenhum (UI vazia não
+mostra modelo), e só então sobe o servidor no mesmo backend que o treino usa.
+Quem prefere container: `docker compose up mlflow`.
+
+> O caminho dos artefatos é gravado **absoluto** no banco. Runs criados no host
+> (artefatos em `<repo>/mlruns`) e runs criados em container (`/app/mlruns`) não
+> se misturam: as métricas aparecem nos dois casos, mas o link do artefato só
+> resolve no mundo em que o run nasceu. Escolha um e fique nele.
+
+A telemetria do MLflow 3 (`config.mlflow-telemetry.io`) fica desligada por
+`MLFLOW_DISABLE_TELEMETRY` — num projeto de curso ela não serve para nada.
 
 A regra que evita a confusão de sempre:
 
