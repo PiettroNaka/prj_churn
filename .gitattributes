@@ -8,3 +8,9 @@
 # DVC continua conferindo byte a byte (é dele que scripts/fetch_data.sh recupera
 # o arquivo), e qualquer CSV que volte para o Git já nasce protegido.
 data/*.csv -text
+
+# .bat com quebra de linha do Unix quebra no cmd do Windows -- e quebra
+# justamente nos blocos `if errorlevel (...)`, que e onde esta o tratamento de
+# erro. O repositorio vive em Linux; a normalizacao no checkout garante CRLF
+# para quem clona no Windows, que e quem vai dar o duplo clique.
+*.bat text eol=crlf

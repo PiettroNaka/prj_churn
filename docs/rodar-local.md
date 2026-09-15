@@ -3,6 +3,22 @@
 Do clone até ver os modelos no MLflow. Cada comando aqui foi executado neste
 projeto — não é roteiro de memória.
 
+## Windows: o caminho de duplo clique
+
+Se você está no Windows e não quer lidar com terminal, a pasta do projeto tem
+dois arquivos para duplo clique:
+
+| arquivo | o que faz |
+|---|---|
+| **`ver-runs.bat`** | gera o relatório dos runs e abre no navegador (HTML estático, sem servidor) |
+| **`abrir-mlflow.bat`** | prepara o que faltar e sobe a UI em `localhost:5000` — deixe a janela aberta |
+
+Os dois se viram sozinhos quanto à pasta: rodam sempre a partir de onde estão,
+então o erro de "abri o terminal na pasta errada" deixa de existir. Se algo
+falhar, a janela fica aberta com a mensagem — é só copiar e pedir ajuda.
+
+Continua precisando do `uv` instalado (seção abaixo) e de ter clonado o projeto.
+
 ## 0. O que precisa estar instalado
 
 | | por quê | conferir |
