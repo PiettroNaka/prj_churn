@@ -437,13 +437,3 @@ Com **MLflow 3.16**:
 | sem `random_state` (acurácia instável) | semente fixa em split e modelo |
 | só imprime `accuracy` | `evaluate` retorna accuracy, precision, recall, f1, roc_auc |
 | tudo em nível de módulo | funções puras + orquestração em `train()` |
-
-## Próximos encontros
-
-- **Enc. 3** ✓ — containerizado: `Dockerfile`, `.dockerignore` e `compose.yml`.
-- **Enc. 4** ✓ — contrato de dados com pandera (`schema.py`, `validation.py`).
-- **Enc. 5** ✓ — `data/` versionado com DVC: ponteiro, remote, duas versões com
-  alternância (`scripts/alternar_versao.sh`) e o pipeline em `dvc.yaml`.
-- **Enc. 6** ✓ — experimentos rastreados com MLflow: runs, grid e a linhagem
-  `data_md5` + `git_commit` costurada ao DVC.
-- **Enc. 7** — Model Registry: promover o vencedor do grid.
