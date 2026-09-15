@@ -112,6 +112,19 @@ jobs:
             -v "$PWD/scripts:/app/scripts" \
             churn:0.1 uv run python scripts/conferir_run.py
 
+      # O modelo tem de RODAR, não só existir: carrega do MLflow e prevê a partir
+      # de linhas cruas do CSV — com customerID e TotalCharges em texto, como
+      # saem do sistema de origem. Um modelo que só aceita feature codificada
+      # não sai do notebook.
+      - name: O modelo roda a partir do MLflow
+        run: |
+          docker run --rm \
+            -e CHURN_MLFLOW_TRACKING_URI=sqlite:////app/mlruns/mlflow.db \
+            -v "$PWD/mlruns:/app/mlruns" \
+            -v "$PWD/data:/app/data" \
+            -v "$PWD/scripts:/app/scripts" \
+            churn:0.1 uv run python scripts/prever.py --n 5
+
       - name: Publica o modelo treinado
         uses: actions/upload-artifact@v7
         with:

@@ -18,10 +18,11 @@ prj_churn/
 │  ├─ model.py       # treino (entrypoint) — instrumentado com MLflow
 │  ├─ experiments.py # o grid rastreado
 │  ├─ lineage.py     # data_md5() e git_commit() — a costura com o DVC
+│  ├─ serving.py     # ChurnPipeline — o modelo que aceita cliente cru
 │  └─ evaluate.py    # métricas
 ├─ tests/            # pytest
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
-├─ scripts/          # fetch_data · profiling · quebra_proposital · gerar_v2 · alternar_versao · conferir_run
+├─ scripts/          # fetch_data · profiling · quebra_proposital · gerar_v2 · alternar_versao · conferir_run · prever
 ├─ docs/             # nota de leitura do Data Pipeline
 ├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
@@ -409,6 +410,49 @@ Os runs do grid ficam aninhados sob um run-pai: a varredura é uma coisa só na 
 E o modelo não é logado nos nove — são florestas de até 500 árvores, e guardar
 todas custa centenas de MB para comparar cinco números.
 
+### Rodar o modelo
+
+O run guarda o modelo; para usá-lo não é preciso escrever Python:
+
+```bash
+uv run python scripts/prever.py              # 5 clientes do dataset
+uv run python scripts/prever.py --n 20
+uv run python scripts/prever.py --csv clientes.csv
+uv run python scripts/prever.py --uri models:/m-abc123
+```
+
+```
+customerID  tenure       Contract real churn  probabilidade  acertou
+ 7004-MAFB       8 Month-to-month  Yes   Yes          0.815     True
+ 7001-QKTG      16       Two year   No    No          0.035     True
+```
+
+A entrada é a linha **crua**, com `customerID` e `TotalCharges` em texto, como
+sai do sistema de origem. Isso não é detalhe: o estimador sozinho recusa essa
+linha —
+
+```
+ValueError: The feature names should match those that were passed during fit.
+```
+
+— porque foi treinado com features derivadas e categóricas já codificadas. Por
+isso o que vai para o MLflow é o **pipeline inteiro** (`churn.serving`,
+`pyfunc`): limpeza, features, encoder e estimador num objeto só, na mesma ordem
+que o treino usou. Ordem diferente aqui seria *training/serving skew* — o modelo
+veria em produção um dado diferente do que viu no treino.
+
+O pacote vai dentro do artefato (`code_paths`), então o modelo carrega onde o
+projeto não está instalado. Para servir como HTTP em vez de rodar em lote:
+
+```bash
+uv run mlflow models serve -m runs:/<run_id>/model --env-manager local
+curl -X POST localhost:5000/invocations -H 'Content-Type: application/json' \
+  -d '{"dataframe_split": {"columns": [...], "data": [[...]]}}'
+```
+
+O CI roda o modelo a cada push: carrega do MLflow e prevê a partir de linhas
+cruas. Modelo que não roda reprova o build.
+
 ### Dois desvios do material, por causa da versão instalada
 
 O guia foi escrito para o backend de arquivos (`./mlruns`) e para `artifact_path=`.
@@ -423,6 +467,12 @@ Com **MLflow 3.16**:
   deixa de ser artefato do run e vira uma entidade própria (*logged model*).
   Carregar continua funcionando pelos dois endereços — `runs:/<run_id>/model` e
   `models:/<model_id>` —, e há um teste garantindo isso.
+
+E um desvio que não é da versão, é de projeto: o material loga
+`mlflow.sklearn.log_model(model, …)`, o estimador solto. Aqui o que se loga é o
+`pyfunc` do pipeline inteiro, pela razão da seção anterior — o estimador solto
+não aceita um cliente. O flavor sklearn continua lá dentro; o que muda é a
+fronteira do que foi empacotado.
 
 
 ## O que mudou em relação ao `train_churn.py`

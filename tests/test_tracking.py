@@ -7,7 +7,10 @@ import mlflow
 import pytest
 
 from churn.config import Settings
+from churn.data import coerce_total_charges
+from churn.features import CategoricalEncoder, add_derived_features
 from churn.model import parametros, train
+from churn.serving import ChurnPipeline
 
 
 @pytest.fixture
@@ -54,14 +57,41 @@ def test_treino_registra_run_com_linhagem(cfg):
     assert float(run["metrics.roc_auc"]) == pytest.approx(metrics["roc_auc"])
 
 
-def test_modelo_logado_pode_ser_recarregado(cfg):
-    """Um modelo registrado que não carrega de volta não serve para nada."""
+def test_modelo_logado_roda_com_cliente_cru(cfg, raw_frame):
+    """O teste que separa "registrado" de "utilizável".
+
+    A entrada é a linha como sai do sistema de origem — com ``customerID``, com
+    ``TotalCharges`` em texto. O estimador solto quebraria aqui; o pipeline
+    logado não pode quebrar, ou o modelo não roda em lugar nenhum.
+    """
     train(cfg)
 
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
-    runs = mlflow.search_runs(experiment_names=[cfg.mlflow_experiment])
-    run_id = runs.iloc[0]["run_id"]
+    run_id = mlflow.search_runs(experiment_names=[cfg.mlflow_experiment]).iloc[0][
+        "run_id"
+    ]
 
-    modelo = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
+    modelo = mlflow.pyfunc.load_model(f"runs:/{run_id}/model")
+    previsto = modelo.predict(raw_frame)
 
-    assert hasattr(modelo, "predict")
+    assert list(previsto.columns) == ["churn", "probabilidade"]
+    assert len(previsto) == len(raw_frame)
+    assert set(previsto["churn"]) <= {"Yes", "No"}
+    assert previsto["probabilidade"].between(0, 1).all()
+
+
+def test_pipeline_aceita_a_linha_sem_id_e_sem_alvo(cfg, raw_frame):
+    """Quem chama manda a linha que tem — com ou sem as colunas que não são feature."""
+    modelo, _ = train(cfg)
+
+    # um encoder ajustado no mesmo formato que o pipeline recebe
+    limpo = raw_frame.drop(columns=["customerID", "Churn"])
+    encoder = CategoricalEncoder().fit(add_derived_features(coerce_total_charges(limpo)))
+    pipeline = ChurnPipeline(modelo, encoder, "customerID", "Churn", "Yes")
+
+    com_tudo = pipeline.preparar(raw_frame)
+    so_features = pipeline.preparar(limpo)
+
+    assert list(com_tudo.columns) == list(so_features.columns)
+    assert "customerID" not in com_tudo.columns
+    assert "gasto_por_mes" in com_tudo.columns

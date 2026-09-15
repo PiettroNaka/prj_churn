@@ -13,7 +13,7 @@ import pickle
 from pathlib import Path
 
 import mlflow
-from mlflow.models import infer_signature
+import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
@@ -26,6 +26,7 @@ from churn.features import (
     split_features_target,
 )
 from churn.lineage import data_md5, git_commit, ponteiro_de
+from churn.serving import log_pipeline
 
 
 def build_model(cfg: Settings) -> RandomForestClassifier:
@@ -95,20 +96,14 @@ def train(cfg: Settings = settings) -> tuple[RandomForestClassifier, dict[str, f
         metrics = evaluate(model, x_test_cod, y_test)
         mlflow.log_metrics(metrics)
 
-        # MLflow 3 usa `name=`; `artifact_path=` ainda funciona, com aviso de
-        # depreciação. A assinatura documenta o contrato do modelo — o que ele
-        # espera receber e o que devolve — e é o que o serving valida depois.
-        mlflow.sklearn.log_model(
-            model,
-            name="model",
-            signature=infer_signature(x_train_cod, model.predict(x_train_cod)),
-            input_example=x_train_cod.head(3),
-        )
+        # O que é logado é o pipeline inteiro (pyfunc), não o estimador solto:
+        # um modelo que não aceita a linha como ela sai do sistema de origem não
+        # roda em lugar nenhum. MLflow 3 usa `name=`, não `artifact_path=`.
+        # A assinatura é inferida da entrada CRUA — é o contrato de quem chama.
+        log_pipeline(model, encoder, cfg, pd.read_csv(cfg.data_path, nrows=3))
 
-        # O encoder vai junto, e pequeno: sem ele o modelo não sabe ler um
-        # cliente novo — o pickle do artifact_path guarda os dois.
+        # E o pickle local continua: é a saída declarada no dvc.yaml.
         save_artifact(model, encoder, cfg.artifact_path)
-        mlflow.log_artifact(str(cfg.artifact_path), artifact_path="pipeline")
 
     return model, metrics
 
