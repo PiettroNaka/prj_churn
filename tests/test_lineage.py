@@ -1,7 +1,10 @@
 """A linhagem tem de responder certo, ou o run aponta para o dado errado."""
 import hashlib
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from churn.lineage import DESCONHECIDO, data_md5, git_commit, ponteiro_de
 
@@ -35,6 +38,21 @@ def test_sem_ponteiro_e_sem_arquivo_diz_desconhecido(tmp_path):
     assert data_md5(tmp_path / "nao-existe.csv.dvc") == DESCONHECIDO
 
 
+def test_sem_git_a_tag_diz_desconhecido(monkeypatch):
+    """Dentro do container não há git — e a tag tem de dizer isso, não estourar.
+
+    É o caso real do deploy: a imagem de treino tem o código, não o repositório.
+    """
+
+    def sem_binario(*args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "git")
+
+    monkeypatch.setattr(subprocess, "run", sem_binario)
+
+    assert git_commit() == DESCONHECIDO
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="sem git neste ambiente")
 def test_git_commit_marca_arvore_suja(tmp_path):
     """Run treinado sobre código não commitado não pode apontar um hash limpo."""
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
