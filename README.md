@@ -31,6 +31,9 @@ prj_churn/
 └─ pyproject.toml    # deps travadas (uv)
 ```
 
+> Primeira vez na sua máquina? O passo a passo completo, com o que instalar e o
+> que fazer quando der errado, está em [`docs/rodar-local.md`](docs/rodar-local.md).
+
 ## Como rodar (uv)
 
 ```bash
