@@ -18,9 +18,14 @@ services:
     depends_on:
       dados:
         condition: service_completed_successfully
+    environment:
+      # Encontro 6: o run tem de sobreviver ao container. Banco e artefatos vão
+      # para o mesmo volume, senão o experimento morre junto com o processo.
+      CHURN_MLFLOW_TRACKING_URI: sqlite:////app/mlruns/mlflow.db
     volumes:
       # bind mounts: edita no host, roda dentro do container, sem rebuild
       - ./src:/app/src
       - ./data:/app/data
       - ./artifacts:/app/artifacts
+      - ./mlruns:/app/mlruns
     command: uv run python -m churn.model

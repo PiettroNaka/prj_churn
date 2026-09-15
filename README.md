@@ -15,14 +15,17 @@ prj_churn/
 │  ├─ quarentena.py  # separa o lote reprovado em vez de treinar com ele
 │  ├─ data.py        # carga + validação + limpeza
 │  ├─ features.py    # transformações puras + encoder sem vazamento
-│  ├─ model.py       # treino (entrypoint)
+│  ├─ model.py       # treino (entrypoint) — instrumentado com MLflow
+│  ├─ experiments.py # o grid rastreado
+│  ├─ lineage.py     # data_md5() e git_commit() — a costura com o DVC
 │  └─ evaluate.py    # métricas
 ├─ tests/            # pytest
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
-├─ scripts/          # fetch_data.sh · profiling · quebra_proposital · gerar_v2 · alternar_versao
+├─ scripts/          # fetch_data · profiling · quebra_proposital · gerar_v2 · alternar_versao · conferir_run
 ├─ docs/             # nota de leitura do Data Pipeline
 ├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
+├─ mlflow.db         # tracking dos experimentos (gitignored)
 ├─ .dvc/             # config do DVC: remote e cache
 └─ pyproject.toml    # deps travadas (uv)
 ```
@@ -32,7 +35,9 @@ prj_churn/
 ```bash
 uv sync                          # cria o ambiente a partir do pyproject/uv.lock
 ./scripts/fetch_data.sh          # traz data/churn.csv (o Git não o guarda mais)
-uv run python -m churn.model     # treina e imprime as métricas
+uv run python -m churn.model     # treina, imprime as métricas e registra o run
+uv run python -m churn.experiments  # o grid: 9 runs + o melhor
+uv run mlflow ui --backend-store-uri sqlite:///mlflow.db   # localhost:5000
 uv run pytest                    # roda os testes
 ```
 
@@ -339,6 +344,84 @@ chegar nela. Em qualquer caminho **confere o md5 contra o `.dvc`**. É como o CI
 materializa o dado — sem DVC instalado e sem remote, só `git` e a biblioteca
 padrão do Python.
 
+## Rastreamento de experimentos (Encontro 6)
+
+O `print(accuracy)` mostra o número e o esquece. Cada execução do treino agora
+vira um **run**: o que foi escolhido, o que foi medido, o modelo e — a parte que
+fecha o bloco anterior — de qual dado e de qual código aquilo saiu.
+
+```bash
+uv run python -m churn.model                              # um run
+uv run python -m churn.experiments                        # o grid: 9 runs
+uv run mlflow ui --backend-store-uri sqlite:///mlflow.db  # localhost:5000
+```
+
+A regra que evita a confusão de sempre:
+
+| | é | exemplo aqui |
+|---|---|---|
+| **param** | o que **você escolheu** | `n_estimators`, `test_size`, `max_depth` |
+| **metric** | o que **você mediu** | `roc_auc`, `accuracy`, `f1` |
+| **artifact** | um **arquivo** gerado | o modelo, o pickle com o encoder |
+| **tag** | **metadado** do run | `data_md5`, `git_commit` |
+
+A config Pydantic vira params numa linha (`cfg.model_dump()`) — os dois contratos
+do curso se encontram aqui. Fora as chaves `mlflow_*`: elas dizem *onde anotar*,
+não *o que foi treinado*.
+
+### A linhagem: onde o DVC e o MLflow se costuram
+
+```
+data_md5   f150a64ab5537f24b16770ba76ad7b95   ← o ponteiro .dvc (Encontro 5)
+git_commit d7ee6e5                            ← o commit do código
+```
+
+`src/churn/lineage.py` lê as duas respostas e o treino as grava como tags. O DVC
+responde "qual dado e qual código"; o MLflow responde "qual experimento, com
+quais params e métricas"; a tag é o fio entre eles. Sem ponteiro `.dvc` por perto,
+`data_md5()` cai no md5 do próprio arquivo — mesma resposta, sem a garantia de
+que a versão está registrada. E `git_commit()` marca `-sujo` quando há mudança
+não commitada: um run treinado sobre código não commitado aponta para um commit
+que não contém aquele código, e a tag precisa dizer isso.
+
+O CI cobra esse fio a cada push (`scripts/conferir_run.py`): o run tem de existir,
+ter métricas, e a tag `data_md5` tem de bater com o md5 do ponteiro. Um modelo
+treinado com outro dado que não o versionado reprova o build.
+
+### O que o grid achou
+
+| run | n_estimators | max_depth | roc_auc | accuracy |
+|---|---|---|---|---|
+| **rf-n500-d8** | 500 | 8 | **0,8220** | 0,7749 |
+| rf-n200-d8 | 200 | 8 | 0,8220 | 0,7727 |
+| rf-n100-d8 | 100 | 8 | 0,8215 | 0,7732 |
+| *rf* (o default) | 200 | — | 0,8150 | 0,7609 |
+
+Podar a árvore em 8 níveis vale mais que triplicar o número delas — e o default
+atual (sem poda) perde para as nove combinações com `max_depth` definido. O campo
+`max_depth` existe na config para que o vencedor seja dizível (`CHURN_MAX_DEPTH=8`),
+mas **promover** o vencedor é assunto do Encontro 7, com o Model Registry.
+
+Os runs do grid ficam aninhados sob um run-pai: a varredura é uma coisa só na UI.
+E o modelo não é logado nos nove — são florestas de até 500 árvores, e guardar
+todas custa centenas de MB para comparar cinco números.
+
+### Dois desvios do material, por causa da versão instalada
+
+O guia foi escrito para o backend de arquivos (`./mlruns`) e para `artifact_path=`.
+Com **MLflow 3.16**:
+
+- **`./mlruns` é recusado.** O erro é explícito: *"the filesystem tracking backend
+  is in maintenance mode"*, e só abre exceção com `MLFLOW_ALLOW_FILE_STORE=true`.
+  O padrão aqui é `sqlite:///mlflow.db` — o caminho que o próprio MLflow
+  recomenda, e que o material já indica na tabela de backends. Os artefatos ficam
+  em `mlruns/`, tudo gitignored.
+- **`artifact_path=` virou `name=`** em `log_model`. Não é só um rename: o modelo
+  deixa de ser artefato do run e vira uma entidade própria (*logged model*).
+  Carregar continua funcionando pelos dois endereços — `runs:/<run_id>/model` e
+  `models:/<model_id>` —, e há um teste garantindo isso.
+
+
 ## O que mudou em relação ao `train_churn.py`
 
 | Script monolítico | Projeto modular |
@@ -358,4 +441,6 @@ padrão do Python.
 - **Enc. 4** ✓ — contrato de dados com pandera (`schema.py`, `validation.py`).
 - **Enc. 5** ✓ — `data/` versionado com DVC: ponteiro, remote, duas versões com
   alternância (`scripts/alternar_versao.sh`) e o pipeline em `dvc.yaml`.
-- **Enc. 6** — rastrear experimentos com MLflow.
+- **Enc. 6** ✓ — experimentos rastreados com MLflow: runs, grid e a linhagem
+  `data_md5` + `git_commit` costurada ao DVC.
+- **Enc. 7** — Model Registry: promover o vencedor do grid.

@@ -15,3 +15,8 @@ artifacts/
 # cache local do DVC; o remote padrão fica FORA do repositório (../dvc-storage),
 # mas quem apontar um remote local para cá não deve versioná-lo por acidente.
 /dvc-storage/
+# runs do MLflow: experimento local é rascunho, não fonte. Em time, o lugar
+# deles é um tracking server (ver README, Encontro 6).
+mlflow.db
+mlartifacts/
+mlruns/
