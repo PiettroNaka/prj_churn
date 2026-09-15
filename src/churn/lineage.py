@@ -55,11 +55,15 @@ def data_md5(dvc_pointer: Path = Path("data/churn.csv.dvc")) -> str:
 
 
 def git_commit() -> str:
-    """Hash curto do commit atual, com ``-sujo`` quando há mudança não commitada.
+    """Hash curto do commit atual, com ``+alteracoes`` quando há coisa não commitada.
 
     O sufixo não é preciosismo: um run treinado em cima de código não commitado
     aponta para um commit que não contém aquele código. Melhor a tag dizer isso
     do que mentir com um hash limpo.
+
+    O Git chama esse estado de *dirty*, e a tradução óbvia seria "sujo" — que
+    neste projeto já significa outra coisa bem diferente (dado fora do contrato,
+    Encontro 4). ``+alteracoes`` diz o mesmo sem confundir as duas conversas.
 
     ``CHURN_GIT_COMMIT`` tem precedência: dentro do container não há ``.git``, e
     sem ela a metade "qual código" da linhagem ficaria em branco justamente no
@@ -79,7 +83,7 @@ def git_commit() -> str:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return DESCONHECIDO
 
-    sujo = subprocess.run(
+    alteracoes = subprocess.run(
         ["git", "status", "--porcelain"], capture_output=True, text=True
     ).stdout.strip()
-    return f"{commit}-sujo" if sujo else commit
+    return f"{commit}+alteracoes" if alteracoes else commit
