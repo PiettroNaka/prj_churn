@@ -239,16 +239,28 @@ data/churn.csv` (o `.dvc` muda), `dvc push` (os bytes sobem) e commite o `.dvc`.
 
 ### Duas versões registradas
 
-| | clientes | md5 | accuracy | roc_auc |
-|---|---|---|---|---|
-| **v1** | 7043 | `d390bd07…` | 0,7570 | 0,8053 |
-| **v2** | 7143 | `f150a64a…` | 0,7609 | 0,8150 |
+| | clientes | md5 | accuracy | roc_auc | |
+|---|---|---|---|---|---|
+| **v1** | 7043 | `d390bd07…` | 0,7570 | 0,8053 | ← **versão rastreada** |
+| v2 | 7143 | `f150a64a…` | 0,7609 | 0,8150 | exercício do `dvc checkout` |
 
-A v2 é a v1 mais 100 clientes, e não é um arquivo que alguém precise guardar:
-`scripts/gerar_v2.py` sorteia 100 clientes existentes com semente fixa e os
-recadastra com identificador novo, copiando o resto da linha byte a byte. Daí
-saem duas propriedades — a v2 já nasce cumprindo o contrato do Encontro 4, e os
-bytes são os mesmos em qualquer máquina.
+A v2 é a v1 mais 100 clientes: `scripts/gerar_v2.py` sorteia 100 clientes
+existentes com semente fixa e os recadastra com identificador novo, copiando o
+resto da linha byte a byte. Isso dá duas propriedades boas — a v2 nasce cumprindo
+o contrato do Encontro 4, e os bytes são iguais em qualquer máquina.
+
+> **A v2 não serve para treinar.** Aquelas 100 linhas são cópias exatas de
+> clientes reais, só com `customerID` trocado. O split é aleatório por linha,
+> então cliente e cópia caem em lados diferentes: medimos **44 pares** com uma
+> metade no treino e a outra no teste. São 44 linhas que o modelo já viu, byte a
+> byte, contadas como acerto — e é daí que vem o `roc_auc` maior, não de um
+> modelo melhor. A v1 reproduz exatamente os números do material
+> (`roc_auc 0,8195`, `accuracy 0,7683`, `f1 0,6151`); a v2 infla em +0,0026.
+>
+> Por isso a **v1 é a versão rastreada**, e o `registry.candidato()` filtra por
+> `tags.data_md5`: um run treinado sobre outra versão do dataset não compete por
+> uma vaga em produção. A v2 continua no histórico para o `dvc checkout` do
+> encontro — é exercício de versionamento, não base de treino.
 
 As métricas mudam entre as duas. É exatamente a pergunta do encontro: *dois
 modelos, duas acurácias — qual CSV gerou qual?* A resposta agora é o commit, que
@@ -414,7 +426,7 @@ não *o que foi treinado*.
 ### A linhagem: onde o DVC e o MLflow se costuram
 
 ```
-data_md5   f150a64ab5537f24b16770ba76ad7b95   ← o ponteiro .dvc (Encontro 5)
+data_md5   d390bd07b5514a2256a2396993b8b0e3   ← o ponteiro .dvc (Encontro 5)
 git_commit d7ee6e5                            ← o commit do código
 ```
 
@@ -561,9 +573,14 @@ modelo = carregar_campeao()           # models:/churn@champion
 modelo.predict(cliente_cru)           # 21 colunas, como saem do sistema
 ```
 
-Verificado de ponta a ponta: `churn v1 @champion`, treinado com `max_depth=8`
-sobre a v2 do dataset (`roc_auc 0.8220`, `data_md5 f150a64a…`), carregado pelo
-alias e respondendo a uma linha crua com `churn` e `probabilidade`.
+Verificado de ponta a ponta: `churn v2 @champion`, treinado com `max_depth=8`
+sobre a **v1 real** do dataset (`roc_auc 0.8195`, `accuracy 0.7683`, `f1 0.6151`
+— os três iguais aos do material; `data_md5 d390bd07…`), carregado pelo alias e
+respondendo a uma linha crua com `churn` e `probabilidade`.
+
+A versão 1 do modelo registrado ficou para trás de propósito: ela veio de um run
+treinado sobre a v2, com a métrica inflada pelas linhas duplicadas. O filtro por
+`data_md5` passou a impedir que um run assim volte a ser promovido.
 
 ### Uma pegadinha que custou uma depuração
 

@@ -5,15 +5,15 @@ stages:
     deps:
     - path: data/churn.csv
       hash: md5
-      md5: f150a64ab5537f24b16770ba76ad7b95
-      size: 995054
+      md5: d390bd07b5514a2256a2396993b8b0e3
+      size: 981685
     - path: src/churn
       hash: md5
-      md5: 2ccc1796d971714316f738d6296e6524.dir
-      size: 44522
-      nfiles: 12
+      md5: f4d168f632dd0b5e4bdb821db7c02bf4.dir
+      size: 53070
+      nfiles: 13
     outs:
     - path: artifacts/churn_model.pkl
       hash: md5
-      md5: 008a388f54b01908e5f89de16f3e0250
-      size: 34817539
+      md5: 45db0d9055124c5c50034ce83b7c6e30
+      size: 34538785

@@ -34,6 +34,7 @@ from mlflow import MlflowClient
 
 from churn.config import Settings, settings
 from churn.experiments import METRICA
+from churn.lineage import data_md5, ponteiro_de
 from churn.serving import NOME_DO_MODELO, carregar
 
 #: Candidata em teste, ainda não promovida. O par de ``champion``.
@@ -49,25 +50,37 @@ def _conectar(cfg: Settings) -> None:
 
 
 def candidato(cfg: Settings = settings) -> pd.Series:
-    """O melhor run **com modelo logado**, pela métrica de decisão.
+    """O melhor run **com modelo logado e treinado no dado atual**.
 
-    Filtra pelo nome de run do ``churn.model``: os filhos do grid pontuam, mas
-    não guardam modelo, e registrar um deles falharia no artefato ausente.
+    Dois filtros, e os dois têm motivo:
+
+    ``run_name`` — os filhos do grid pontuam mas não guardam modelo, e registrar
+    um deles falharia no artefato ausente.
+
+    ``data_md5`` — comparar por métrica entre runs que viram dados diferentes não
+    compara nada. Sem este filtro, um run antigo treinado sobre outra versão do
+    dataset vence por décimos e vai para produção; é como a versão com 100 linhas
+    duplicadas chegou a ser promovida uma vez, com a métrica inflada pelas cópias
+    que caíram no teste. O ``data_md5`` que o Encontro 6 já grava é o que
+    distingue um caso do outro.
     """
     _conectar(cfg)
+    md5_atual = data_md5(ponteiro_de(cfg.data_path))
     runs = mlflow.search_runs(
         experiment_names=[cfg.mlflow_experiment],
         filter_string=(
             f"attributes.run_name = '{cfg.mlflow_run_name}' "
+            f"and tags.data_md5 = '{md5_atual}' "
             f"and metrics.{METRICA} > 0"
         ),
         order_by=[f"metrics.{METRICA} DESC"],
     )
     if runs.empty:
         raise PromocaoRecusada(
-            f"Nenhum run '{cfg.mlflow_run_name}' com {METRICA} no experimento "
-            f"'{cfg.mlflow_experiment}'. A varredura escolhe a configuração, mas "
-            "quem loga o modelo é o treino: rode `uv run python -m churn.model`."
+            f"Nenhum run '{cfg.mlflow_run_name}' com {METRICA} treinado sobre o "
+            f"dado atual (data_md5 {md5_atual[:8]}…) no experimento "
+            f"'{cfg.mlflow_experiment}'. Runs de outra versão do dataset não "
+            "contam. Rode `uv run python -m churn.model`."
         )
     return runs.iloc[0]
 
