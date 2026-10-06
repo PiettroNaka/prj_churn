@@ -75,19 +75,34 @@ def test_sem_run_com_modelo_a_mensagem_diz_o_que_fazer(monkeypatch):
         registry.candidato()
 
 
-def test_busca_ignora_os_filhos_do_grid(monkeypatch):
-    """Os runs do grid pontuam mas não logam modelo — registrar um deles falharia."""
-    capturado = {}
+@pytest.fixture
+def busca_espiada(monkeypatch):
+    """Captura o filter_string da busca, sem backend nem dado em disco."""
+    capturado: dict[str, object] = {}
     monkeypatch.setattr(registry, "_conectar", lambda cfg: None)
+    monkeypatch.setattr(registry, "data_md5", lambda ponteiro: "abc123def456")
+    monkeypatch.setattr(mlflow, "search_runs", lambda **kw: capturado.update(kw)
+                        or pd.DataFrame([{"run_id": "x", f"metrics.{METRICA}": 0.9}]))
+    return capturado
 
-    def falsa_busca(**kwargs):
-        capturado.update(kwargs)
-        return pd.DataFrame([{"run_id": "x", f"metrics.{METRICA}": 0.9}])
 
-    monkeypatch.setattr(mlflow, "search_runs", falsa_busca)
+def test_busca_ignora_os_filhos_do_grid(busca_espiada):
+    """Os runs do grid pontuam mas não logam modelo — registrar um deles falharia."""
     registry.candidato()
 
-    assert f"run_name = '{settings.mlflow_run_name}'" in capturado["filter_string"]
+    assert f"run_name = '{settings.mlflow_run_name}'" in busca_espiada["filter_string"]
+
+
+def test_busca_so_aceita_runs_do_dado_atual(busca_espiada):
+    """Métrica de run treinado em outro dataset não é comparável com a daqui.
+
+    Sem este filtro, um run antigo sobre outra versão do dado vence por décimos e
+    vai para produção — foi assim que a versão com linhas duplicadas, cuja métrica
+    estava inflada pelas cópias caídas no teste, chegou a ser promovida.
+    """
+    registry.candidato()
+
+    assert "tags.data_md5 = 'abc123def456'" in busca_espiada["filter_string"]
 
 
 def test_uri_do_campeao_usa_alias_e_nao_versao_fixa():

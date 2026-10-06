@@ -29,10 +29,16 @@ falha — dado silenciosamente diferente é pior que dado ausente.
 
 ## As duas versões
 
-| | clientes | bytes | md5 |
-|---|---|---|---|
-| **v1** | 7043 | 981.685 | `d390bd07b5514a2256a2396993b8b0e3` |
-| **v2** | 7143 | 995.054 | `f150a64ab5537f24b16770ba76ad7b95` |
+| | clientes | bytes | md5 | |
+|---|---|---|---|---|
+| **v1** | 7043 | 981.685 | `d390bd07b5514a2256a2396993b8b0e3` | ← **rastreada** |
+| v2 | 7143 | 995.054 | `f150a64ab5537f24b16770ba76ad7b95` | só `dvc checkout` |
+
+> **Treinar usa a v1.** As 100 linhas extras da v2 são cópias exatas de clientes
+> reais com `customerID` novo. Como o split é por linha, cliente e cópia se
+> separam entre treino e teste — 44 pares, medidos. O modelo é avaliado sobre
+> linhas que já viu, e a métrica sobe sem ele melhorar. A v2 existe para
+> exercitar o `dvc checkout` do Encontro 5, não para treinar.
 
 A v1 é o arquivo como veio da aula. Confere byte a byte com o distribuído pelo
 professor: `sha256 1b90d77671ab4d396b1bd403eadd764d8457aec50467ad99f586eaabf9304596`.
