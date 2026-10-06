@@ -25,9 +25,7 @@ prj_churn/
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
 ├─ scripts/          # preparar · relatorio (sem navegador) · fetch_data · mlflow_ui · prever · profiling · gerar_v2 · alternar_versao · quebra_proposital · conferir_run
 ├─ docs/             # nota de leitura do Data Pipeline
-├─ ver-runs.bat      # Windows: duplo clique → o relatório dos runs
-├─ abrir-mlflow.bat  # Windows: duplo clique → a UI do MLflow
-├─ atualizar.bat     # Windows: duplo clique → traz a versão nova, desenrosca o Git
+├─ windows/          # Windows: os três arquivos de duplo clique (ver windows/README.md)
 ├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
 ├─ mlflow.db         # tracking dos experimentos (gitignored)

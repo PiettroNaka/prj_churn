@@ -4,7 +4,7 @@ REM
 REM %~dp0 e a pasta DESTE arquivo, entao nao importa de onde ele for chamado --
 REM o "cd errado" deixa de existir. E o relatorio e um HTML estatico: abre por
 REM file://, sem servidor, sem porta e sem proxy no caminho.
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo Gerando o relatorio dos runs...
 echo.
