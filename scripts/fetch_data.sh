@@ -83,11 +83,28 @@ fi
 # precisar do ambiente do projeto instalado).
 if ! confere; then
     echo "O ponteiro não é o da v1; reconstruindo a v2..."
-    if ! command -v python3 >/dev/null 2>&1; then
-        echo "ERRO: preciso de python3 para rodar scripts/gerar_v2.py." >&2
+    # No Windows não existe `python3`, e `python` costuma ser o atalho da
+    # Microsoft Store, que não executa nada — era aqui que a rede de segurança
+    # arrebentava justamente na máquina que mais precisa dela. Procuramos um
+    # interpretador que de fato rode, em vez de exigir um nome específico.
+    PY=""
+    for candidato in python3 python py; do
+        command -v "$candidato" >/dev/null 2>&1 || continue
+        if "$candidato" -c "import sys" >/dev/null 2>&1; then
+            PY="$candidato"
+            break
+        fi
+    done
+    # último recurso: o interpretador do próprio projeto
+    if [ -z "$PY" ] && command -v uv >/dev/null 2>&1; then
+        PY="uv run python"
+    fi
+    if [ -z "$PY" ]; then
+        echo "ERRO: preciso de um Python para rodar scripts/gerar_v2.py." >&2
+        echo "      tentei: python3, python, py, uv run python." >&2
         exit 1
     fi
-    python3 scripts/gerar_v2.py >/dev/null || {
+    $PY scripts/gerar_v2.py >/dev/null || {
         echo "ERRO: scripts/gerar_v2.py falhou." >&2
         exit 1
     }

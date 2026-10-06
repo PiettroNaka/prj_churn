@@ -19,6 +19,7 @@ prj_churn/
 │  ├─ experiments.py # o grid rastreado
 │  ├─ lineage.py     # data_md5() e git_commit() — a costura com o DVC
 │  ├─ serving.py     # ChurnPipeline — o modelo que aceita cliente cru
+│  ├─ registry.py    # promove o vencedor a @champion (Encontro 7)
 │  └─ evaluate.py    # métricas
 ├─ tests/            # pytest
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
@@ -515,6 +516,62 @@ E um desvio que não é da versão, é de projeto: o material loga
 `pyfunc` do pipeline inteiro, pela razão da seção anterior — o estimador solto
 não aceita um cliente. O flavor sklearn continua lá dentro; o que muda é a
 fronteira do que foi empacotado.
+
+
+## Model Registry (Encontro 7)
+
+A varredura acha o melhor run. Semanas depois, "qual era mesmo?" não se responde
+rolando uma lista — e um run é um experimento, não um artefato de produção. O
+Registry dá o endereço estável.
+
+```bash
+uv run python -m churn.experiments              # 1. acha a melhor configuração
+CHURN_MAX_DEPTH=8 uv run python -m churn.model  # 2. treina e loga o vencedor
+uv run python -m churn.registry                 # 3. registra e promove
+```
+
+Três peças: o **registered model** (`churn`) agrupa versões; cada **version** é
+imutável; o **alias** `@champion` é um ponteiro móvel para a que serve. Promover
+é mover o alias; reverter é movê-lo de volta — `registry.apontar(1)` devolve a
+produção à versão 1 sem treinar, sem registrar e sem tocar em servidor.
+
+Aliases e não stages: `Staging`/`Production` estão depreciados no MLflow 3.
+
+### Qual run é promovível
+
+Os filhos do grid pontuam mas **não logam modelo** — são nove florestas de até
+500 árvores, e a varredura existe para escolher a configuração, não para guardar
+candidatos. Quem loga o pipeline é o `churn.model`. Então `candidato()` filtra
+pelo nome de run do treino; promover um filho do grid falharia no artefato
+ausente, e a mensagem de erro manda rodar o treino em vez de estourar um
+traceback.
+
+### O portão
+
+`promover()` só registra se a métrica alcançar `mlflow_promocao_minima` (0.80).
+Abaixo disso levanta `PromocaoRecusada`. Um portão que deixa passar é pior que
+nenhum: dá a impressão de que alguém conferiu.
+
+### Consumir
+
+```python
+from churn.registry import carregar_campeao
+
+modelo = carregar_campeao()           # models:/churn@champion
+modelo.predict(cliente_cru)           # 21 colunas, como saem do sistema
+```
+
+Verificado de ponta a ponta: `churn v1 @champion`, treinado com `max_depth=8`
+sobre a v2 do dataset (`roc_auc 0.8220`, `data_md5 f150a64a…`), carregado pelo
+alias e respondendo a uma linha crua com `churn` e `probabilidade`.
+
+### Uma pegadinha que custou uma depuração
+
+`carregar_campeao` precisa fixar a tracking URI **antes** do load. Sem isso o
+MLflow procura o registry no backend padrão e responde `Registered Model with
+name=churn not found` — com o modelo registrado. É o mesmo atrito de runs
+espalhados do Encontro 6, reaparecendo na hora de consumir. Há um teste de
+regressão travando a ordem das chamadas.
 
 
 ## O que mudou em relação ao `train_churn.py`

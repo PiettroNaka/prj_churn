@@ -57,5 +57,16 @@ class Settings(BaseSettings):
     mlflow_experiment: str = "churn"
     mlflow_run_name: str = "rf"
 
+    # promoção no Model Registry (Encontro 7)
+    #
+    # O nome agrupa as versões; o alias aponta a que serve. Aliases e não stages:
+    # Staging/Production estão depreciados no MLflow 3.
+    mlflow_registered_model: str = "churn"
+    mlflow_champion_alias: str = "champion"
+    # O portão. Promover sem conferir é publicar qualquer coisa que terminou de
+    # treinar — inclusive um modelo pior que o que já está em produção. O valor
+    # é baixo de propósito: é um piso de sanidade, não a meta.
+    mlflow_promocao_minima: float = 0.80
+
 
 settings = Settings()
