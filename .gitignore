@@ -5,6 +5,13 @@ artifacts/
 .env
 .pytest_cache/
 
+# MLflow: backend de tracking e artefatos locais.
+# Ficam fora do Git de propósito — são estado de máquina, não código. Em time
+# isto vira `mlflow server` com Postgres e S3, compartilhado.
+mlflow.db
+mlartifacts/
+mlruns/
+
 # dados: versionados no Git ATÉ o DVC entrar, no Encontro 5.
 #
 # São 981 KB — cabem no Git sem incomodar. Mantê-los fora custava caro em dois

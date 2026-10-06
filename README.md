@@ -12,8 +12,12 @@ prj_churn/
 │  ├─ config.py      # Settings (Pydantic) — caminhos, hiperparâmetros
 │  ├─ data.py        # carga + validação + limpeza
 │  ├─ features.py    # transformações puras + encoder sem vazamento
-│  ├─ model.py       # treino (entrypoint)
-│  └─ evaluate.py    # métricas
+│  ├─ model.py       # treino instrumentado com MLflow (entrypoint)
+│  ├─ evaluate.py    # métricas
+│  ├─ validation.py  # schemas pandera (contrato do dataset)
+│  ├─ lineage.py     # data_md5 + git_commit (tags de linhagem)
+│  ├─ experiments.py # o grid rastreado
+│  └─ registry.py    # promover o melhor run a @champion
 ├─ tests/            # pytest
 ├─ data/             # dataset (no Git até o Enc. 5, depois DVC)
 └─ pyproject.toml    # deps travadas (uv)
@@ -77,6 +81,66 @@ acumulado é 0 de verdade — 4 delas são churners, e jogá-las fora tiraria si
 da classe minoritária. Em vez de excluir, o schema **exige** a relação: branco
 com `tenure > 0` é corrupção e reprova o dataset.
 
+## ML Pipeline — MLflow (Encontros 6–8)
+
+Cada treino é um run permanente. O `print` continua, mas já não é a memória do
+experimento.
+
+```bash
+uv run python -m churn.model        # um treino, registrado
+uv run python -m churn.experiments  # o grid: 9 runs comparáveis
+uv run python -m churn.registry     # promove o melhor a @champion
+mlflow ui --backend-store-uri sqlite:///mlflow.db   # localhost:5000
+```
+
+### O grid
+
+| run | n_estimators | max_depth | roc_auc | accuracy |
+|---|---|---|---|---|
+| **rf-n200-d8** | 200 | 8 | **0.8195** | 0.7683 |
+| rf-n500-d8 | 500 | 8 | 0.8192 | 0.7723 |
+| rf-n100-d8 | 100 | 8 | 0.8182 | 0.7655 |
+| rf-n500-d16 | 500 | 16 | 0.8068 | 0.7604 |
+
+`max_depth=8` domina; 16 já piora (overfit) e `None` fica no meio — viés-variância
+visível com dado de verdade.
+
+### Portão de promoção
+
+`registry.promote_best` só registra e move o alias se o melhor run passar de
+`promotion_min_roc_auc` (0.80). Abaixo disso levanta `PromotionError` em vez de
+rebaixar a produção em silêncio.
+
+### Consumir o modelo de produção
+
+```python
+import mlflow
+model = mlflow.pyfunc.load_model("models:/churn@champion")
+model.predict(x_novo)
+```
+
+`models:/nome@alias` é a referência estável — quem consome não precisa saber qual
+run gerou o modelo. É esta chamada que a API do Encontro 12 vai fazer.
+
+### Linhagem
+
+Todo run carrega `data_md5`, `git_commit` e `git_dirty`, fechando a cadeia
+**dado → código → experimento → modelo**.
+
+O `data_md5` lê o ponteiro `data/churn.csv.dvc` quando ele existir; enquanto o
+DVC não entra (Encontro 5), calcula o md5 do próprio CSV — e o valor é o mesmo,
+porque para arquivo único o md5 que o `dvc add` grava é o md5 do conteúdo.
+
+### Atritos do MLflow 3 já resolvidos aqui
+
+| Atrito | Como está tratado |
+|---|---|
+| file store `./mlruns` recusado | `tracking_uri` = `sqlite:///mlflow.db` no `config.py` |
+| `log_model(artifact_path=)` removido | usamos `name=` |
+| skops reclama ao recarregar sklearn | `serialization_format="cloudpickle"` |
+| runs somem entre shells | URI fixada em código, não só em env var |
+| stages depreciados | aliases `@champion` / `@challenger` |
+
 ## O que mudou em relação ao `train_churn.py`
 
 | Script monolítico | Projeto modular |
@@ -94,5 +158,6 @@ com `tenure > 0` é corrupção e reprova o dataset.
 
 - **Enc. 3** ✓ — containerizado: `Dockerfile`, `.dockerignore` e `compose.yml`.
 - **Enc. 4** ✓ — validação de dados com pandera (`validation.py`).
-- **Enc. 5** — versionar `data/` com DVC.
-- **Enc. 6** — rastrear experimentos com MLflow.
+- **Enc. 6–8** ✓ — MLflow: tracking, registry e empacotamento.
+- **Enc. 5** — versionar `data/` com DVC (pendente; o `lineage.py` já o espera).
+- **Enc. 9–11** — orquestrar com Airflow.
