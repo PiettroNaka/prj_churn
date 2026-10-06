@@ -5,20 +5,21 @@ projeto — não é roteiro de memória.
 
 ## Windows: o caminho de duplo clique
 
-Se você está no Windows e não quer lidar com terminal, a pasta do projeto tem
-dois arquivos para duplo clique:
+Se você está no Windows e não quer lidar com terminal, abra a pasta
+**`windows/`** dentro do projeto. São três arquivos para duplo clique:
 
 | arquivo | o que faz |
 |---|---|
-| **`ver-runs.bat`** | gera o relatório dos runs e abre no navegador (HTML estático, sem servidor) |
-| **`abrir-mlflow.bat`** | prepara o que faltar e sobe a UI em `localhost:5000` — deixe a janela aberta |
-| **`atualizar.bat`** | traz a versão mais nova e desfaz qualquer enrosco do Git |
+| **`windows/ver-runs.bat`** | gera o relatório dos runs e abre no navegador (HTML estático, sem servidor) |
+| **`windows/abrir-mlflow.bat`** | prepara o que faltar e sobe a UI em `localhost:5000` — deixe a janela aberta |
+| **`windows/atualizar.bat`** | traz a versão mais nova e desfaz qualquer enrosco do Git |
 
-Os três se viram sozinhos quanto à pasta: rodam sempre a partir de onde estão,
-então o erro de "abri o terminal na pasta errada" deixa de existir. Se algo
+Os três se viram sozinhos quanto à pasta: cada um sobe para a raiz do projeto
+antes de rodar, então o erro de "abri o terminal na pasta errada" deixa de
+existir. Se algo
 falhar, a janela fica aberta com a mensagem — é só copiar e pedir ajuda.
 
-O `atualizar.bat` merece uma palavra, porque ele **descarta** o que estiver
+O `windows/atualizar.bat` merece uma palavra, porque ele **descarta** o que estiver
 modificado na pasta. Isso é de propósito: aqui o projeto é lido, não escrito — o
 código é feito no GitHub. Quando a branch de trabalho é reescrita lá, o `git
 pull` daqui vira um conflito sobre mudanças que não são suas, e sair dele à mão
@@ -199,9 +200,9 @@ e sobe a UI. `--porta 5001` troca a porta; `--so-dado` para depois do CSV.
 | `uv: command not found` | o instalador não entrou no PATH | feche e reabra o terminal, ou `source $HOME/.local/bin/env` |
 | `./scripts/…` não é reconhecido (Windows) | PowerShell não roda `.sh` | `uv run python scripts/preparar.py`, ou abra o **Git Bash** |
 | `cd caminho/para/prj_churn` falha | `caminho/para` era um exemplo, não um caminho real | use a pasta onde você clonou; se o prompt já termina em `prj_churn`, você já está nela |
-| `You have not concluded your merge (MERGE_HEAD exists)` | um `git pull` anterior parou no meio e nunca terminou | **`atualizar.bat`** |
-| `Your local changes would be overwritten by checkout` | há arquivo modificado na pasta barrando a troca de branch | **`atualizar.bat`** |
-| `have diverged, and have N and M different commits each` | a branch foi reescrita no GitHub; o histórico daqui não existe mais lá | **`atualizar.bat`** |
+| `You have not concluded your merge (MERGE_HEAD exists)` | um `git pull` anterior parou no meio e nunca terminou | **`windows/atualizar.bat`** |
+| `Your local changes would be overwritten by checkout` | há arquivo modificado na pasta barrando a troca de branch | **`windows/atualizar.bat`** |
+| `have diverged, and have N and M different commits each` | a branch foi reescrita no GitHub; o histórico daqui não existe mais lá | **`windows/atualizar.bat`** |
 | `Permission denied` ao rodar um script | bit de execução perdido no clone | `chmod +x scripts/*.sh` |
 | Porta 5000 ocupada no **macOS** | é o AirPlay Receiver, não outro MLflow | `./scripts/mlflow_ui.sh 5001`, ou desligue em Ajustes → Geral → AirDrop e Handoff |
 | UI abre vazia, sem run nenhum | banco novo, nada treinado ainda | `uv run python -m churn.model` |

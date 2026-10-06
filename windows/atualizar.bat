@@ -7,7 +7,7 @@ REM Por que isso acontece: o projeto e escrito no GitHub e so lido aqui. Quando 
 REM branch de trabalho e reescrita la, o `git pull` daqui vira um conflito que
 REM nao existe para ninguem -- e nao ha nada local que valha a pena salvar.
 REM Resolver a mao custa cinco comandos; este arquivo e os cinco.
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo Estado atual desta pasta:
 echo.
@@ -80,7 +80,8 @@ echo   Pronto. A pasta esta na main, limpa e com o ambiente instalado:
 echo.
 git log --oneline -1
 echo.
-echo   Agora:  ver-runs.bat      ve os modelos ja treinados
+echo   Agora, nesta mesma pasta windows\:
+echo           ver-runs.bat      ve os modelos ja treinados
 echo           abrir-mlflow.bat  sobe a interface em localhost:5000
 echo  ---------------------------------------------------------------
 echo.
