@@ -212,8 +212,10 @@ def _api_embutida():
         from churn.demonstracao import subir_api_embutida
 
         return subir_api_embutida(porta=PORTA_LOCAL)
-    except Exception:  # noqa: BLE001 — o modo demonstração assume daqui
-        return None
+    except Exception as erro:  # noqa: BLE001 — o modo demonstração assume daqui
+        from churn.demonstracao import TentativaDeApi
+
+        return TentativaDeApi(motivo=f"{type(erro).__name__}: {erro}")
 
 
 saude = _saude_da_api()
@@ -221,8 +223,13 @@ saude = _saude_da_api()
 # Só tentamos subir a API quando ela deveria estar aqui dentro. Se o endereço
 # aponta para outra máquina e ela não responde, subir uma local responderia a
 # pergunta errada — e esconderia que o serviço de verdade está fora do ar.
-if saude is None and API in {f"http://127.0.0.1:{PORTA_LOCAL}", f"http://localhost:{PORTA_LOCAL}"}:
-    if _api_embutida() is not None:
+tentativa = None
+if saude is None and API in {
+    f"http://127.0.0.1:{PORTA_LOCAL}",
+    f"http://localhost:{PORTA_LOCAL}",
+}:
+    tentativa = _api_embutida()
+    if tentativa.no_ar:
         saude = _saude_da_api()
 
 com_api = bool(saude and saude.get("status") == "ok")
@@ -246,6 +253,10 @@ with st.sidebar:
         )
         if saude is not None:
             st.caption(f"A API respondeu, mas sem modelo: {saude.get('detalhe', '')}")
+        # Num deploy remoto a tela é o único canal de diagnóstico que existe.
+        if tentativa is not None and tentativa.motivo:
+            with st.expander("Por que a API não subiu"):
+                st.code(tentativa.motivo, language=None)
 
 if st.button("Calcular churn", type="primary", use_container_width=True):
     if com_api:

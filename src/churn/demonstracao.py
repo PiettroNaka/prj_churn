@@ -35,8 +35,10 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 from churn.config import Settings, settings
@@ -156,41 +158,126 @@ def garantir_campeao(cfg: Settings = settings) -> str:
     return str(promover(cfg))
 
 
+@dataclass(frozen=True)
+class TentativaDeApi:
+    """O resultado de tentar subir a API — e, quando não dá, o porquê.
+
+    O motivo não é luxo de log: num deploy remoto, a tela é o único canal de
+    diagnóstico que existe. "A API não subiu" manda quem está depurando
+    adivinhar entre dez causas; "não consegui escrever em /mount/src" manda
+    direto à certa.
+    """
+
+    processo: subprocess.Popen | None = None
+    motivo: str | None = None
+
+    @property
+    def no_ar(self) -> bool:
+        return self.processo is not None
+
+
+def _saida_de(arquivo: Path, linhas: int = 6) -> str:
+    """As últimas linhas do que o uvicorn escreveu antes de morrer."""
+    try:
+        texto = arquivo.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return "(sem saída)"
+    return "\n".join(texto.splitlines()[-linhas:]) or "(sem saída)"
+
+
+def _ambiente(cfg: Settings) -> str:
+    """Retrato curto do que o ambiente permite — vai junto com o motivo da falha.
+
+    Num deploy remoto cada ida e volta custa uma mensagem ao usuário. Em vez de
+    pedir "roda isto e me diz", a própria tela já responde as perguntas que eu
+    faria: dá para escrever? dá para importar o uvicorn? quanta memória sobra?
+    """
+    linhas = []
+
+    alvo = Path(cfg.data_path).resolve().parent
+    try:
+        alvo.mkdir(parents=True, exist_ok=True)
+        teste = alvo / ".escrita-teste"
+        teste.write_text("x", encoding="utf-8")
+        teste.unlink()
+        linhas.append(f"escrita em {alvo}: ok")
+    except OSError as erro:
+        linhas.append(f"escrita em {alvo}: FALHOU ({erro})")
+
+    try:
+        import uvicorn  # noqa: F401
+
+        linhas.append("uvicorn: importável")
+    except Exception as erro:  # noqa: BLE001
+        linhas.append(f"uvicorn: FALHOU ({erro})")
+
+    try:
+        campos = dict(
+            linha.split(":", 1)
+            for linha in Path("/proc/meminfo").read_text().splitlines()
+            if ":" in linha
+        )
+        livre = int(campos["MemAvailable"].strip().split()[0]) // 1024
+        linhas.append(f"memória disponível: {livre} MB")
+    except Exception:  # noqa: BLE001 — informação extra, nunca um erro
+        pass
+
+    linhas.append(f"python: {sys.version.split()[0]}")
+    return "\n".join(linhas)
+
+
 def subir_api_embutida(
     porta: int = 8000, cfg: Settings = settings, espera: int = 90
-) -> subprocess.Popen | None:
-    """Sobe a API neste mesmo container e devolve o processo.
+) -> TentativaDeApi:
+    """Sobe a API neste mesmo container e devolve o processo, ou o motivo.
 
     Para o Streamlit Community Cloud, que roda **um** processo: em vez de o
     front passar a carregar modelo — o que apagaria a fronteira que o projeto
     inteiro defende —, a API sobe ao lado dele, em 127.0.0.1, e o front
     continua apenas perguntando.
 
-    Devolve ``None`` se não deu, em vez de levantar: quem chama tem a
-    :func:`pipeline_local` como rede de segurança, e derrubar a tela inteira
-    porque a API não subiu seria trocar um problema por um pior.
+    Nunca levanta: quem chama tem a :func:`pipeline_local` como rede de
+    segurança, e derrubar a tela inteira porque a API não subiu seria trocar um
+    problema por um pior. Mas o ``motivo`` volta preenchido, para a tela poder
+    dizer o que houve em vez de só encolher os ombros.
     """
     try:
         garantir_campeao(cfg)
-    except Exception:  # noqa: BLE001 — sem campeão não há API para subir
-        return None
+    except Exception as erro:  # noqa: BLE001 — sem campeão não há API para subir
+        return TentativaDeApi(
+            motivo=f"não consegui promover um campeão: {type(erro).__name__}: "
+            f"{erro}\n\n{_ambiente(cfg)}"
+        )
 
-    processo = subprocess.Popen(
-        [
-            sys.executable, "-m", "uvicorn", "churn.api:app",
-            "--host", "127.0.0.1", "--port", str(porta),
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    registro = Path(tempfile.gettempdir()) / "churn-uvicorn.log"
+    try:
+        with registro.open("w", encoding="utf-8") as saida:
+            processo = subprocess.Popen(
+                [
+                    sys.executable, "-m", "uvicorn", "churn.api:app",
+                    "--host", "127.0.0.1", "--port", str(porta),
+                ],
+                stdout=saida,
+                stderr=subprocess.STDOUT,
+            )
+    except OSError as erro:
+        return TentativaDeApi(
+            motivo=f"não consegui iniciar o uvicorn: {erro}\n\n{_ambiente(cfg)}"
+        )
 
     alvo = f"http://127.0.0.1:{porta}/saude"
     for _ in range(espera):
         if _responde(alvo):
-            return processo
+            return TentativaDeApi(processo=processo)
         if processo.poll() is not None:
-            return None
+            return TentativaDeApi(
+                motivo=f"o uvicorn encerrou (código {processo.returncode}):\n"
+                f"{_saida_de(registro)}\n\n{_ambiente(cfg)}"
+            )
         time.sleep(1)
 
     processo.terminate()
-    return None
+    return TentativaDeApi(
+        motivo=f"o uvicorn não respondeu em {espera}s:\n{_saida_de(registro)}\n\n"
+        f"{_ambiente(cfg)}"
+    )
