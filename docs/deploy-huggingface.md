@@ -1,7 +1,13 @@
 # Publicar no Hugging Face Spaces
 
-Deploy gratuito, sem cartão de crédito, com URL pública — e rodando a **pilha
-inteira**, não só o front.
+> **Atenção: isto deixou de ser gratuito.** O Hugging Face passou a exigir plano
+> pago (PRO ou créditos) para Spaces com Docker ou Gradio; só os **Static
+> Spaces** continuam livres, e eles não rodam Python. Este guia fica porque a
+> imagem funciona e é testada no CI a cada push — mas para um deploy sem custo,
+> o caminho é o **[Streamlit Community Cloud](../README.md#publicar-de-graça-com-a-api-junto)**,
+> que roda a mesma pilha completa.
+
+Deploy com URL pública rodando a **pilha inteira**, não só o front.
 
 ```
 você  →  Streamlit (porta 7860)  →  FastAPI (127.0.0.1:8000)  →  modelo @champion
