@@ -103,6 +103,10 @@ Modelo treinado. Métricas no teste:
 Isso cria o `mlflow.db` e o primeiro run. Para as nove combinações do grid:
 `uv run python -m churn.experiments` (~1 minuto).
 
+Para o ajuste fino — 24 candidatos em seis eixos, com validação cruzada —
+`uv run python -m churn.tuning` (~2 minutos). Ele termina treinando o vencedor,
+então o run que sai já pode ser promovido com `uv run python -m churn.registry`.
+
 ## 5. Ver os modelos
 
 ```bash

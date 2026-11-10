@@ -30,10 +30,19 @@ from churn.serving import log_pipeline
 
 
 def build_model(cfg: Settings) -> RandomForestClassifier:
-    """Instancia o classificador com semente fixa (reprodutível)."""
+    """Instancia o classificador com semente fixa (reprodutível).
+
+    Os seis hiperparâmetros são os mesmos que o ``churn.tuning`` varre. É o que
+    fecha o ciclo: o que a busca encontra, a config diz, e este construtor
+    treina de novo — sem ninguém reescrever uma chamada à mão.
+    """
     return RandomForestClassifier(
         n_estimators=cfg.n_estimators,
         max_depth=cfg.max_depth,
+        min_samples_leaf=cfg.min_samples_leaf,
+        min_samples_split=cfg.min_samples_split,
+        max_features=cfg.max_features,
+        class_weight=cfg.class_weight,
         random_state=cfg.random_state,
     )
 
@@ -50,11 +59,15 @@ def parametros(cfg: Settings) -> dict[str, object]:
 
     Fora as chaves ``mlflow_*``: elas dizem *onde anotar*, não *o que foi
     treinado*. Param é entrada do experimento; endereço do caderno não é.
+
+    Fora também as ``tuning_*``, pela mesma régua invertida: elas descrevem uma
+    busca que este run não fez. Logá-las aqui faria todo treino parecer resultado
+    de uma varredura de 24 candidatos, inclusive os que ninguém varreu.
     """
     return {
         chave: valor
         for chave, valor in cfg.model_dump().items()
-        if not chave.startswith("mlflow_")
+        if not chave.startswith(("mlflow_", "tuning_"))
     }
 
 
