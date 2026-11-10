@@ -101,16 +101,32 @@ st.divider()
 
 st.header("Dados")
 
-caminho = RAIZ / settings.data_path
-if not caminho.exists():
-    st.error(
-        f"`{settings.data_path}` não está no disco. O CSV não vive no Git — quem "
-        "o versiona é o DVC."
-    )
+@st.cache_resource(show_spinner="Materializando o dataset…")
+def materializar() -> str:
+    """O CSV não vive no Git — quem o versiona é o DVC (Encontro 5).
+
+    Num deploy de vitrine não há remote do DVC nem histórico para recuperar o
+    blob, então o módulo de demonstração busca os bytes por HTTP e **confere o
+    md5 contra o ponteiro** antes de aceitá-los. Transporte diferente, mesma
+    verificação.
+    """
+    from churn.demonstracao import garantir_dataset
+
+    # caminho absoluto: o Streamlit pode ser lançado de qualquer pasta, e um
+    # caminho relativo apontaria para fora do projeto
+    daqui = settings.model_copy(update={"data_path": RAIZ / settings.data_path})
+    return str(garantir_dataset(daqui))
+
+
+try:
+    caminho = materializar()
+except Exception as erro:  # noqa: BLE001 — a causa vai para a tela
+    st.error(f"Não consegui materializar `{settings.data_path}`.")
+    st.caption(str(erro))
     st.code("uv run python scripts/preparar.py --so-dado", language="bash")
     st.stop()
 
-dados = carregar_dados(str(caminho))
+dados = carregar_dados(caminho)
 churners = (dados[settings.target] == settings.positive_label).mean()
 
 esquerda, meio, direita = st.columns(3)

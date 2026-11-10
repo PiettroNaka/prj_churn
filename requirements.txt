@@ -1,0 +1,32 @@
+# Dependências para deploy em plataforma que instala por pip — o Streamlit
+# Community Cloud, por exemplo. A fonte da verdade continua sendo o
+# pyproject.toml + uv.lock; este arquivo existe porque nem toda plataforma lê
+# os dois.
+#
+# A linha que resolve o bloqueio principal é a última. Sem ela o pacote `churn`
+# nunca é instalado, e o app quebra na primeira linha de import — antes de
+# desenhar qualquer coisa na tela.
+#
+# As versões são as do uv.lock, fixadas: uma plataforma que resolve sozinha
+# escolheria outras, e aí o modelo treinado lá não seria o modelo treinado aqui
+# — exatamente o que os Encontros 2 e 3 existem para impedir.
+
+pandas==2.3.3
+scikit-learn==1.9.0
+scipy==1.17.1
+numpy==2.4.6
+pydantic==2.13.4
+pydantic-settings==2.15.0
+pandera==0.32.1
+pyyaml==6.0.3
+# o ChurnPipeline herda de mlflow.pyfunc.PythonModel, entao o mlflow entra
+# mesmo no deploy que nao tem tracking nenhum
+mlflow==3.16.0
+
+# o front
+streamlit==1.67.0
+requests==2.34.2
+
+# O projeto em si, a partir do pyproject.toml deste repositório. É o que põe
+# `src/churn` no ambiente e faz `from churn.config import settings` funcionar.
+.

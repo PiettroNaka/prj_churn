@@ -57,6 +57,16 @@ uv run --group api uvicorn churn.api:app         # API  → localhost:8000/docs
 uv run --group app streamlit run app/Inicio.py   # front → localhost:8501
 ```
 
+Os quatro de uma vez, que é como se apresenta isto:
+
+```bash
+uv run --group api --group app python scripts/subir_front.py
+```
+
+Ele confere o dataset, promove um campeão se não houver, sobe a API em segundo
+plano, espera ela responder e só então abre o Streamlit — encerrando os dois
+juntos no fim. No Windows é o **`subir-front.bat`**, em duplo clique.
+
 Outros pontos de entrada:
 
 ```bash
@@ -72,8 +82,9 @@ uv run pytest                         # 122 testes
 Os testes **não precisam do dataset** — usam amostras de `tests/conftest.py`.
 Quem precisa dele é o treino.
 
-> **Windows:** o PowerShell não roda `.sh`. Há três arquivos de duplo clique na
-> raiz — `ver-runs.bat`, `abrir-mlflow.bat` e `atualizar.bat` — e o equivalente
+> **Windows:** o PowerShell não roda `.sh`. Há quatro arquivos de duplo clique na
+> raiz — `subir-front.bat`, `ver-runs.bat`, `abrir-mlflow.bat` e
+> `atualizar.bat` — e o equivalente
 > em Python puro para o resto: `uv run python scripts/preparar.py`. O passo a
 > passo completo está em [`docs/rodar-local.md`](docs/rodar-local.md).
 
@@ -98,6 +109,37 @@ docker compose up app         # 4. sobe a API e o front juntos
 O `app` declara `depends_on: api (service_healthy)`, e **saudável aqui significa
 com modelo carregado**, não "a porta respondeu". Subir o front contra uma API sem
 campeão só adiantaria o erro para quem está olhando.
+
+### Publicar no Streamlit Community Cloud
+
+| campo | valor |
+|---|---|
+| Repository | `PiettroNaka/prj_churn` |
+| Branch | `main` |
+| Main file path | `app/Inicio.py` |
+
+Duas coisas tornam isso possível, e nenhuma delas é padrão num projeto que usa
+DVC e MLflow:
+
+**O `requirements.txt`.** A plataforma instala por pip, não por uv. A última
+linha dele é `.` — é o que instala o pacote a partir do `pyproject.toml` e faz
+`from churn.config import settings` funcionar. Sem ela o app quebra na primeira
+linha de import, antes de desenhar qualquer coisa.
+
+**O modo demonstração.** Na nuvem não há API, não há MLflow e não há o CSV, que
+saiu do Git no Encontro 5. O front detecta isso e se vira: busca o dataset por
+HTTP do commit em que ele ainda era versionado — **conferindo o md5 contra o
+ponteiro `.dvc`**, transporte diferente e mesma verificação — e treina o modelo
+na própria sessão, com a configuração que a busca encontrou.
+
+A barra lateral diz qual dos dois respondeu, sempre. Um número que sai de um
+modelo treinado na hora não é o mesmo que sai do campeão promovido, e quem olha
+tem o direito de saber qual é qual.
+
+> O modo demonstração é vitrine, não arquitetura. O desenho do projeto é
+> front → API → Registry, e é o que roda em `docker compose up app` ou no
+> `subir-front.bat`. Para apontar a vitrine para uma API hospedada de verdade,
+> basta definir `CHURN_API_URL` nos *secrets* da plataforma.
 
 ---
 
@@ -578,6 +620,9 @@ Onde este projeto **não** serve, dito antes que alguém descubra sozinho.
   subida. É adequado aqui — num container, reiniciar *é* o deploy — mas não é
   *hot reload*.
 - **Host e container não compartilham runs** (ver dificuldade nº 4).
+- **O modo demonstração não passa pelo Registry.** Ele treina na sessão, então
+  não há versão, não há alias e não há rollback — as três coisas que o Encontro
+  7 existe para dar. Serve para a vitrine pública; não serve como deploy.
 - **O portão de promoção (0,80) é um piso de sanidade, não uma meta.** Ele barra
   um modelo quebrado, não um modelo medíocre.
 
@@ -642,15 +687,17 @@ prj_churn/
 │  ├─ lineage.py     # data_md5() e git_commit() — a costura com o DVC
 │  ├─ serving.py     # ChurnPipeline — o modelo que aceita cliente cru
 │  ├─ registry.py    # promove o vencedor a @champion
-│  └─ api.py         # FastAPI — o campeão atrás de HTTP
+│  ├─ api.py         # FastAPI — o campeão atrás de HTTP
+│  └─ demonstracao.py # o modo vitrine: sem API, sem Registry, sem CSV no disco
 ├─ app/              # Streamlit: Inicio.py (v1) + pages/ (v2)
+├─ requirements.txt  # para plataformas que instalam por pip (Streamlit Cloud)
 ├─ tests/            # 122 testes
 ├─ scripts/          # preparar · relatorio · fetch_data · mlflow_ui · prever
 │                    # profiling · gerar_v2 · alternar_versao · quebra_proposital
 │                    # conferir_run · conferir_api
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
 ├─ docs/             # rodar-local.md · data-pipeline.md
-├─ *.bat             # Windows: ver-runs · abrir-mlflow · atualizar
+├─ *.bat             # Windows: subir-front · ver-runs · abrir-mlflow · atualizar
 ├─ Dockerfile        # treino        Dockerfile.dados  # dvc pull no deploy
 ├─ Dockerfile.api    # a API         Dockerfile.app    # o front
 ├─ compose.yml       # dados · tuning · promover · api · app · mlflow

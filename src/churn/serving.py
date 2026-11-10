@@ -71,9 +71,42 @@ class ChurnPipeline(mlflow.pyfunc.PythonModel):
         return entrada.drop(columns=descartaveis)
 
     def preparar(self, entrada: pd.DataFrame) -> pd.DataFrame:
-        """Põe a linha crua no formato que o estimador espera."""
+        """Põe a linha crua no formato que o estimador espera — inclusive a ordem.
+
+        A reordenação no fim não é zelo: o sklearn compara ``feature_names_in_``
+        **posição a posição** e recusa a chamada quando a ordem difere, com uma
+        mensagem que não diz qual coluna saiu do lugar. E a ordem difere com
+        facilidade — o CSV lista ``tenure`` logo depois de ``Dependents``, o
+        contrato do schema o declara junto das outras numéricas, no fim. Montar
+        um cliente a partir do contrato (que é o que a API e o formulário fazem)
+        já produz a ordem "errada".
+
+        Isso funcionava por acidente: o MLflow reordena as colunas pela
+        assinatura antes de chamar o modelo, então só quem passava por ele
+        escapava. Quem instancia o pipeline direto — o modo demonstração — batia
+        no erro do sklearn. O pipeline passa a se bastar.
+        """
         df = self.entrada_de_servico(entrada.copy())
-        return self._encoder.transform(add_derived_features(coerce_total_charges(df)))
+
+        # antes de transformar: um KeyError do pandas no meio do encoder não diz
+        # o que faltou nem por quê
+        ausentes = [coluna for coluna in self._encoder.colunas if coluna not in df.columns]
+        if ausentes:
+            raise ValueError(f"Faltam colunas para prever: {', '.join(ausentes)}.")
+
+        preparado = self._encoder.transform(add_derived_features(coerce_total_charges(df)))
+
+        esperadas = getattr(self._modelo, "feature_names_in_", None)
+        if esperadas is None:
+            return preparado
+
+        faltando = [coluna for coluna in esperadas if coluna not in preparado.columns]
+        if faltando:
+            raise ValueError(
+                f"Faltam colunas para prever: {', '.join(faltando)}. "
+                f"O modelo foi treinado com {len(esperadas)} features."
+            )
+        return preparado[list(esperadas)]
 
     def predict(self, context, model_input: pd.DataFrame, params=None) -> pd.DataFrame:
         """Devolve o rótulo e a probabilidade de churn, uma linha por cliente."""

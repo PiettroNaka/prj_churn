@@ -44,6 +44,16 @@ class CategoricalEncoder:
         )
         self._columns: list[str] = []
 
+    @property
+    def colunas(self) -> list[str]:
+        """As categóricas vistas no ``fit`` — o que o ``transform`` vai exigir.
+
+        Pública para que quem chama possa conferir a entrada *antes* de
+        transformar: sem isso, uma coluna ausente vira um ``KeyError`` do pandas
+        que não diz o que faltou nem por quê.
+        """
+        return list(self._columns)
+
     def fit(self, features: pd.DataFrame) -> "CategoricalEncoder":
         self._columns = features.select_dtypes(include="object").columns.tolist()
         self._encoder.fit(features[self._columns])

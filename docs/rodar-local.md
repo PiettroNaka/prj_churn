@@ -10,11 +10,12 @@ dois arquivos para duplo clique:
 
 | arquivo | o que faz |
 |---|---|
+| **`subir-front.bat`** | sobe tudo — dado, campeão, API e Streamlit — e abre o navegador |
 | **`ver-runs.bat`** | gera o relatório dos runs e abre no navegador (HTML estático, sem servidor) |
 | **`abrir-mlflow.bat`** | prepara o que faltar e sobe a UI em `localhost:5000` — deixe a janela aberta |
 | **`atualizar.bat`** | traz a versão mais nova e desfaz qualquer enrosco do Git |
 
-Os três se viram sozinhos quanto à pasta: rodam sempre a partir de onde estão,
+Os quatro se viram sozinhos quanto à pasta: rodam sempre a partir de onde estão,
 então o erro de "abri o terminal na pasta errada" deixa de existir. Se algo
 falhar, a janela fica aberta com a mensagem — é só copiar e pedir ajuda.
 
@@ -163,7 +164,14 @@ uv run --group api uvicorn churn.api:app      # localhost:8000/docs
 uv run --group app streamlit run app/Inicio.py  # localhost:8501
 ```
 
-Os dois precisam de um campeão promovido — `uv run python -m churn.tuning`
+Os quatro passos de uma vez (é o que o `subir-front.bat` faz no Windows):
+
+```bash
+uv run --group api --group app python scripts/subir_front.py
+uv run --group api --group app python scripts/subir_front.py --porta 8502
+```
+
+Separados, os dois precisam de um campeão promovido — `uv run python -m churn.tuning`
 seguido de `uv run python -m churn.registry`. Sem isso a API sobe e responde
 "sem modelo" em `/saude`, e o front mostra a mensagem em vez de calcular.
 

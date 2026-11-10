@@ -16,6 +16,7 @@ from churn.config import Settings
 from churn.tuning import (
     ESPACO,
     HIPERPARAMETROS,
+    VENCEDOR,
     como_variaveis,
     config_vencedora,
     espaco_total,
@@ -141,3 +142,20 @@ def test_o_vencedor_da_busca_e_treinavel_pela_config(dados_minimos):
 
     for nome, valor in melhores.items():
         assert getattr(modelo, nome) == valor
+
+
+def test_o_vencedor_registrado_e_dizivel_pela_config():
+    """O `VENCEDOR` alimenta a vitrine; se ele divergir do espaço, trava aqui.
+
+    Um valor fora do `ESPACO` significaria que ninguém o encontrou buscando — e
+    um campo que a `Settings` não tem seria descartado pelo `model_copy`,
+    treinando outra coisa em silêncio.
+    """
+    assert set(VENCEDOR) == set(HIPERPARAMETROS)
+
+    for nome, valor in VENCEDOR.items():
+        assert valor in ESPACO[nome], f"{nome}={valor!r} não está no espaço de busca"
+
+    vencedora = config_vencedora(VENCEDOR, Settings())
+    for nome, valor in VENCEDOR.items():
+        assert getattr(vencedora, nome) == valor
