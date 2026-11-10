@@ -85,3 +85,21 @@ def test_cliente_exemplo_e_aceito_pela_api():
     from churn.api import Cliente
 
     assert Cliente(**cliente_exemplo())
+
+
+def test_garantir_campeao_nao_retreina_o_que_ja_existe(monkeypatch):
+    """Idempotência: a plataforma reinicia o processo, e treinar de novo o mesmo
+    modelo seria desperdício puro — além de atrasar a primeira tela."""
+    from churn import demonstracao
+
+    treinos: list[int] = []
+    monkeypatch.setattr(
+        demonstracao, "garantir_dataset", lambda cfg=None: treinos.append(1)
+    )
+    monkeypatch.setattr(
+        "churn.registry.versao_do_alias",
+        lambda cfg=None: type("MV", (), {"version": 7})(),
+    )
+
+    assert demonstracao.garantir_campeao() == "7"
+    assert treinos == [], "retreinou mesmo havendo campeão promovido"

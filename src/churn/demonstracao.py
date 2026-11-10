@@ -9,15 +9,21 @@ de vitrine — o Streamlit Community Cloud, por exemplo — existe **um** proces
 o repositório clonado, e nada mais: sem MLflow, sem API, e sem o CSV, que saiu
 do Git no Encontro 5.
 
-Este módulo é a saída para esse caso, e só para ele:
+Este módulo é a saída para esse caso, e só para ele. São duas saídas, em ordem
+de preferência:
 
     garantir_dataset()   materializa data/churn.csv, conferindo o md5
-    pipeline_local()     treina e devolve o ChurnPipeline, sem MLflow
+    subir_api_embutida() treina, promove e sobe a API AQUI, no mesmo container
+    pipeline_local()     se nem isso der, treina e prevê sem API nenhuma
 
-**Não é o caminho normal e não deve virar um.** Quando há API, o front fala com
-ela; este módulo só entra quando não há. O front deixa isso à vista em vez de
-esconder — um número que sai de um modelo treinado na hora não é o mesmo número
-que sai do campeão promovido, e quem olha tem o direito de saber qual é qual.
+A primeira preserva o desenho: há API, há Registry, há alias, e o front continua
+só perguntando. Um processo a mais no mesmo container é bem menos concessão do
+que o front passar a carregar modelo.
+
+A segunda é a rede de segurança. **Não é o caminho normal e não deve virar um.**
+O front deixa à vista qual das duas respondeu — um número que sai de um modelo
+treinado na hora não é o mesmo número que sai do campeão promovido, e quem olha
+tem o direito de saber qual é qual.
 
 O dado vem de onde ele sempre esteve: o CSV foi versionado pelo Git até o
 Encontro 5, e o GitHub continua servindo aquele commit por HTTP. A disciplina do
@@ -27,6 +33,9 @@ ponteiro ``data/churn.csv.dvc``. Transporte diferente, mesma verificação.
 from __future__ import annotations
 
 import hashlib
+import subprocess
+import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -112,3 +121,76 @@ def pipeline_local(cfg: Settings = settings) -> tuple["ChurnPipeline", dict[str,
         modelo, encoder, cfg.id_column, cfg.target, cfg.positive_label
     )
     return pipeline, metricas
+
+
+# --------------------------------------------------------------------------
+# a API dentro do mesmo processo — para plataformas de um container só
+# --------------------------------------------------------------------------
+
+
+def _responde(url: str, espera: float = 2.0) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=espera):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def garantir_campeao(cfg: Settings = settings) -> str:
+    """Treina e promove, se ainda não houver um ``@champion``. Devolve a versão.
+
+    Idempotente de propósito: numa plataforma que reinicia o processo sozinha,
+    isto roda de novo a cada subida, e treinar duas vezes o mesmo modelo seria
+    desperdício puro.
+    """
+    from churn.model import train
+    from churn.registry import promover, versao_do_alias
+    from churn.tuning import VENCEDOR
+
+    if (versao := versao_do_alias(cfg)) is not None:
+        return str(versao.version)
+
+    garantir_dataset(cfg)
+    # a configuração que a busca encontrou — a mesma que o Registry promoveria
+    train(cfg.model_copy(update=VENCEDOR))
+    return str(promover(cfg))
+
+
+def subir_api_embutida(
+    porta: int = 8000, cfg: Settings = settings, espera: int = 90
+) -> subprocess.Popen | None:
+    """Sobe a API neste mesmo container e devolve o processo.
+
+    Para o Streamlit Community Cloud, que roda **um** processo: em vez de o
+    front passar a carregar modelo — o que apagaria a fronteira que o projeto
+    inteiro defende —, a API sobe ao lado dele, em 127.0.0.1, e o front
+    continua apenas perguntando.
+
+    Devolve ``None`` se não deu, em vez de levantar: quem chama tem a
+    :func:`pipeline_local` como rede de segurança, e derrubar a tela inteira
+    porque a API não subiu seria trocar um problema por um pior.
+    """
+    try:
+        garantir_campeao(cfg)
+    except Exception:  # noqa: BLE001 — sem campeão não há API para subir
+        return None
+
+    processo = subprocess.Popen(
+        [
+            sys.executable, "-m", "uvicorn", "churn.api:app",
+            "--host", "127.0.0.1", "--port", str(porta),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    alvo = f"http://127.0.0.1:{porta}/saude"
+    for _ in range(espera):
+        if _responde(alvo):
+            return processo
+        if processo.poll() is not None:
+            return None
+        time.sleep(1)
+
+    processo.terminate()
+    return None

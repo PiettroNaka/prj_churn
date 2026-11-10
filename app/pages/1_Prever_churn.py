@@ -22,8 +22,11 @@ import streamlit as st
 from churn.contrato import campos_de_entrada, cliente_exemplo, total_esperado
 from churn.schema import TOLERANCIA_TOTAL
 
+#: A porta em que a API sobe quando ela vive no mesmo container que o front.
+PORTA_LOCAL = 8000
+
 #: Onde a API responde. No compose é ``http://api:8000``; na sua máquina, local.
-API = os.environ.get("CHURN_API_URL", "http://localhost:8000").rstrip("/")
+API = os.environ.get("CHURN_API_URL", f"http://127.0.0.1:{PORTA_LOCAL}").rstrip("/")
 
 #: Como agrupar os 19 campos. O contrato não tem noção de seção — ele descreve
 #: colunas, não telas —, então a ordem de leitura é decisão do front.
@@ -176,7 +179,34 @@ def _saude_da_api() -> dict | None:
         return None
 
 
+@st.cache_resource(
+    show_spinner="Subindo a API e promovendo o modelo (primeira vez, ~40s)…"
+)
+def _api_embutida():
+    """Sobe a API ao lado do front, para plataformas que rodam um processo só.
+
+    O Streamlit Community Cloud roda **um** processo. A alternativa seria o
+    front carregar o modelo, apagando a fronteira que o projeto inteiro defende.
+    Um processo a mais no mesmo container é bem menos concessão: continua
+    havendo API, Registry e alias, e o front continua só perguntando.
+
+    `cache_resource` porque isto tem de acontecer uma vez por processo, não a
+    cada clique — e o processo da API precisa sobreviver ao fim do script.
+    """
+    from churn.demonstracao import subir_api_embutida
+
+    return subir_api_embutida(porta=PORTA_LOCAL)
+
+
 saude = _saude_da_api()
+
+# Só tentamos subir a API quando ela deveria estar aqui dentro. Se o endereço
+# aponta para outra máquina e ela não responde, subir uma local responderia a
+# pergunta errada — e esconderia que o serviço de verdade está fora do ar.
+if saude is None and API in {f"http://127.0.0.1:{PORTA_LOCAL}", f"http://localhost:{PORTA_LOCAL}"}:
+    if _api_embutida() is not None:
+        saude = _saude_da_api()
+
 com_api = bool(saude and saude.get("status") == "ok")
 
 with st.sidebar:
@@ -191,10 +221,10 @@ with st.sidebar:
     else:
         st.info("Modo demonstração")
         st.caption(
-            "Sem API alcançável, o modelo é treinado aqui mesmo — mesmo dado, "
-            "mesma semente e mesmos hiperparâmetros, mas **sem** passar pelo "
-            "Registry. Para o caminho de verdade: `subir-front.bat` no Windows, "
-            "ou `docker compose up app`."
+            "A API não subiu, então o modelo é treinado aqui mesmo — mesmo "
+            "dado, mesma semente e mesmos hiperparâmetros, mas **sem** passar "
+            "pelo Registry. Para o caminho de verdade: `subir-front.bat` no "
+            "Windows, ou `docker compose up app`."
         )
         if saude is not None:
             st.caption(f"A API respondeu, mas sem modelo: {saude.get('detalhe', '')}")

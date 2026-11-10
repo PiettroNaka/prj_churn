@@ -110,55 +110,54 @@ O `app` declara `depends_on: api (service_healthy)`, e **saudável aqui signific
 com modelo carregado**, não "a porta respondeu". Subir o front contra uma API sem
 campeão só adiantaria o erro para quem está olhando.
 
-### Publicar no Streamlit Community Cloud
+### Publicar de graça, com a API junto
 
 | campo | valor |
 |---|---|
+| plataforma | **Streamlit Community Cloud** (gratuito, sem cartão) |
 | Repository | `PiettroNaka/prj_churn` |
 | Branch | `main` |
 | Main file path | `app/Inicio.py` |
 
-Duas coisas tornam isso possível, e nenhuma delas é padrão num projeto que usa
-DVC e MLflow:
+O deploy roda a **pilha inteira**, não só o front. A plataforma roda um processo
+só; em vez de o front passar a carregar modelo — o que apagaria a fronteira que
+o projeto inteiro defende —, **a API sobe ao lado dele**:
+
+```
+Streamlit (porta pública)  →  FastAPI (127.0.0.1:8000)  →  modelo @champion
+             └──────────── o mesmo container ────────────┘
+```
+
+Na primeira visita à página de previsão, o app materializa o dataset, treina com
+a configuração vencedora, promove a `@champion` e sobe a API — uns 40 segundos,
+uma vez só. Depois a barra lateral mostra **"API · modelo v1"**, e cada previsão
+é uma chamada HTTP ao campeão promovido.
+
+Três coisas tornam isso possível, e nenhuma é padrão num projeto com DVC e
+MLflow:
 
 **O `requirements.txt`.** A plataforma instala por pip, não por uv. A última
-linha dele é `.` — é o que instala o pacote a partir do `pyproject.toml` e faz
+linha é `.` — é o que instala o pacote a partir do `pyproject.toml` e faz
 `from churn.config import settings` funcionar. Sem ela o app quebra na primeira
 linha de import, antes de desenhar qualquer coisa.
 
-**O modo demonstração.** Na nuvem não há API, não há MLflow e não há o CSV, que
-saiu do Git no Encontro 5. O front detecta isso e se vira: busca o dataset por
-HTTP do commit em que ele ainda era versionado — **conferindo o md5 contra o
-ponteiro `.dvc`**, transporte diferente e mesma verificação — e treina o modelo
-na própria sessão, com a configuração que a busca encontrou.
+**O dataset por HTTP.** Ele saiu do Git no Encontro 5, e o clone da plataforma é
+raso, então nem o histórico vem junto. O `churn.demonstracao` busca os bytes do
+commit em que ele ainda era versionado e **só os aceita se o md5 bater com o
+ponteiro `.dvc`** — transporte diferente, mesma verificação.
 
-A barra lateral diz qual dos dois respondeu, sempre. Um número que sai de um
-modelo treinado na hora não é o mesmo que sai do campeão promovido, e quem olha
-tem o direito de saber qual é qual.
+**A rede de segurança.** Se a API não subir (memória apertada, por exemplo), o
+front treina o modelo na própria sessão e **diz isso na barra lateral**: "Modo
+demonstração". Um número que sai de um modelo treinado na hora não é o mesmo que
+sai do campeão promovido, e quem olha tem o direito de saber qual é qual.
 
-> O modo demonstração é vitrine, não arquitetura. O desenho do projeto é
-> front → API → Registry, e é o que roda em `docker compose up app` ou no
-> `subir-front.bat`. Para apontar a vitrine para uma API hospedada de verdade,
-> basta definir `CHURN_API_URL` nos *secrets* da plataforma.
+### E o Hugging Face Spaces?
 
-### Publicar no Hugging Face Spaces
-
-É o deploy que roda a **pilha inteira**, não só o front — e sem custo nem
-cartão. O Spaces expõe uma porta só, então os dois processos dividem um
-container em vez de o front passar a carregar modelo:
-
-```
-Streamlit (7860, pública)  →  FastAPI (127.0.0.1:8000)  →  modelo @champion
-```
-
-O repositório do Space tem **dois arquivos**, ambos em `deploy/spaces/`: o
-`Dockerfile` (que clona este repositório, instala, treina e promove) e o
-`README.md` com o cabeçalho que a plataforma lê. O passo a passo está em
-[`docs/deploy-huggingface.md`](docs/deploy-huggingface.md).
-
-O modelo é treinado e promovido **na construção da imagem**, com a configuração
-que a busca encontrou. O Space nasce com `churn v1 @champion` pronto, e a barra
-lateral do front diz "API · modelo v1" — ali não é modo demonstração.
+A imagem existe em `deploy/spaces/` e é construída e testada pelo CI a cada
+push — ela roda a mesma pilha num container só. Mas o Hugging Face passou a
+**exigir plano pago** para Spaces com Docker; só os Static Spaces seguem livres,
+e eles não rodam Python. O guia está em
+[`docs/deploy-huggingface.md`](docs/deploy-huggingface.md), para quem tiver PRO.
 
 ---
 
