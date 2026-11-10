@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     min_samples_split: int = 2
     #: "sqrt", "log2" ou None (todas as features em cada split).
     max_features: str | None = "sqrt"
-    #: None ou "balanced". Com ~27% de churn, "balanced" compra recall pagando
+    #: None ou "balanced". Com ~33% de churn, "balanced" compra recall pagando
     #: em precisão; qual dos dois vale mais é decisão de negócio, não do modelo.
     class_weight: str | None = None
 

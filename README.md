@@ -1,763 +1,83 @@
 # prj_churn
 
 Projeto-fio-condutor do curso de MLOps: previsão de **churn** (classificação
-binária tabular). Este repositório é o *depois* da refatoração do Encontro 2 —
-o script monolítico `train_churn.py` reorganizado na estrutura modular.
+binária tabular, dataset Telco). O repositório é o caminho completo do script
+monolítico `train_churn.py` até um modelo **validado, versionado, rastreado,
+promovido, servido por HTTP e consumido por um front** — tudo reproduzível em
+container.
 
-## Estrutura
+O que o projeto responde, no fim: *dado um cliente, qual a probabilidade de ele
+cancelar — e de qual dado e de qual código essa resposta saiu?*
 
-```
-prj_churn/
-├─ src/churn/
-│  ├─ config.py      # Settings (Pydantic) — caminhos, hiperparâmetros
-│  ├─ schema.py      # ChurnSchema — o contrato dos dados (pandera)
-│  ├─ validation.py  # executa o contrato e traduz a falha
-│  ├─ quarentena.py  # separa o lote reprovado em vez de treinar com ele
-│  ├─ data.py        # carga + validação + limpeza
-│  ├─ features.py    # transformações puras + encoder sem vazamento
-│  ├─ model.py       # treino (entrypoint) — instrumentado com MLflow
-│  ├─ experiments.py # o grid rastreado
-│  ├─ tuning.py      # a busca aleatória em 6 eixos — o ajuste fino
-│  ├─ lineage.py     # data_md5() e git_commit() — a costura com o DVC
-│  ├─ serving.py     # ChurnPipeline — o modelo que aceita cliente cru
-│  ├─ registry.py    # promove o vencedor a @champion (Encontro 7)
-│  ├─ contrato.py    # o contrato traduzido: alimenta a API e o formulário
-│  ├─ api.py         # FastAPI — o campeão atrás de HTTP
-│  └─ evaluate.py    # métricas
-├─ app/              # Streamlit: Inicio.py (v1) + pages/ (v2)
-├─ tests/            # pytest
-├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
-├─ scripts/          # preparar · relatorio (sem navegador) · fetch_data · mlflow_ui · prever · profiling · gerar_v2 · alternar_versao · quebra_proposital · conferir_run
-├─ docs/             # nota de leitura do Data Pipeline
-├─ ver-runs.bat      # Windows: duplo clique → o relatório dos runs
-├─ abrir-mlflow.bat  # Windows: duplo clique → a UI do MLflow
-├─ atualizar.bat     # Windows: duplo clique → traz a versão nova, desenrosca o Git
-├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
-├─ Dockerfile.api    # a imagem da API
-├─ Dockerfile.app    # a imagem do front
-├─ compose.yml       # a pilha: dados · tuning · promover · api · app · mlflow
-├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
-├─ mlflow.db         # tracking dos experimentos (gitignored)
-├─ .dvc/             # config do DVC: remote e cache
-└─ pyproject.toml    # deps travadas (uv)
-```
+---
 
-> Primeira vez na sua máquina? O passo a passo completo, com o que instalar e o
-> que fazer quando der errado, está em [`docs/rodar-local.md`](docs/rodar-local.md).
+## Sumário
 
-## Como rodar (uv)
-
-```bash
-uv sync                          # cria o ambiente a partir do pyproject/uv.lock
-./scripts/fetch_data.sh          # traz data/churn.csv (o Git não o guarda mais)
-uv run python -m churn.model     # treina, imprime as métricas e registra o run
-uv run python -m churn.experiments  # o grid: 9 runs + o melhor
-uv run python -m churn.tuning       # a busca fina: 24 candidatos + treina o vencedor
-uv run python -m churn.registry  # promove o vencedor a @champion
-uv run --group api uvicorn churn.api:app          # a API em localhost:8000
-uv run --group app streamlit run app/Inicio.py    # o front em localhost:8501
-uv run mlflow ui --backend-store-uri sqlite:///mlflow.db   # localhost:5000
-uv run pytest                    # roda os testes
-```
-
-Os testes não precisam do dataset — usam amostras de `tests/conftest.py`. Quem
-precisa dele é o treino.
-
-Sem uv, para desenvolvimento rápido:
-
-```bash
-pip install -e ".[dev]"
-./scripts/fetch_data.sh
-python -m churn.model
-pytest
-```
-
-## Rodar no container (Encontro 3)
-
-O `pyproject.toml` + `uv.lock` travam os pacotes Python; o container trava o resto
-(interpretador, SO, libs de sistema). Dados e artefatos entram por volume — não
-viram camada da imagem.
-
-```bash
-docker build -t churn:0.1 .
-docker run -v "$PWD/data:/app/data" -v "$PWD/artifacts:/app/artifacts" churn:0.1
-```
-
-Ou, sem decorar flags:
-
-```bash
-docker compose up
-```
-
-O `compose up` sobe dois serviços: `dados` busca o CSV com `dvc pull` (imagem
-`Dockerfile.dados`, que tem o DVC e o ponteiro, mas não os bytes) e, só quando
-ele termina bem, `treino` roda. O dado nunca é camada de imagem — nem da imagem
-de treino, que segue enxuta, sem DVC dentro.
-
-## Validação de dados (Encontro 4)
-
-O contrato do dataset é declarativo e executável. Ele é uma **classe** —
-`DataFrameModel` do pandera, a mesma intuição do Pydantic do Encontro 2: lá o
-contrato é da config, aqui é dos dados.
-
-```
-src/churn/schema.py       ChurnRawSchema · ChurnSchema   → o que é um dado válido
-src/churn/validation.py   validate_raw · validate_clean  → o que fazer quando não é
-```
-
-O pipeline valida **duas vezes**: o CSV cru, antes de qualquer transformação, e o
-DataFrame já limpo, antes de virar feature. A coerção de tipos acontece entre os
-dois, à vista — em vez de `coerce=True` mascarando sujeira de verdade.
-
-| Camada | Cobre |
+| | |
 |---|---|
-| schema | as 21 colunas e seus tipos (`coerce=True` converte ao validar; `strict=False` tolera coluna a mais) |
-| domínio | as categorias válidas de cada coluna, `customerID` único — erro fatal, exceto nas duas colunas de catálogo, onde é alerta (abaixo) |
-| faixas | `tenure` 0–72, `MonthlyCharges` 18–119, `TotalCharges` ≥ 0 |
-| nulos | alvo `Churn` nunca nulo |
-| coerência | sem internet ⇒ os 6 add-ons dizem `No internet service`; sem telefone ⇒ `MultipleLines` diz `No phone service` |
-| relações | `TotalCharges` ≈ `tenure` × `MonthlyCharges` (tolerância de 10%) quando `tenure > 1` |
+| [O que está pronto](#o-que-está-pronto) | a pilha, encontro por encontro |
+| [Como rodar](#como-rodar) | local e em Docker |
+| [**Como a previsão melhorou**](#como-a-previsão-melhorou) | os números, e quanto deles é mérito do modelo |
+| [Como foi implementado](#como-foi-implementado) | cada camada, e a decisão por trás |
+| [**Dificuldades encontradas**](#dificuldades-encontradas) | os erros reais, e o que cada um ensinou |
+| [**Ressalvas e limites**](#ressalvas-e-limites) | onde este projeto não serve |
+| [Testes e CI](#testes-e-ci) | o que é provado a cada push |
+| [Estrutura](#estrutura) | o mapa dos arquivos |
 
-Falha levanta `DataValidationError` (que é um `ValueError`) em modo `lazy` — o
-relatório traz **todas** as violações de uma vez, não só a primeira, e vem
-também estruturado em `erro.failure_cases` (coluna, regra, valor) para logar.
+---
 
-São as três ações que o encontro pede diante de um lote ruim: **falhar cedo**
-(antes do treino, não depois da métrica cair), **logar os `failure_cases`** e
-**quarentenar o lote** — `artifacts/quarentena/<timestamp>/` guarda as linhas
-ofensivas e o relatório. Quarentena não substitui a falha; ela existe porque
-relatório sobre um arquivo que já foi embora não conserta nada. Quem escreve é a
-orquestração (`load_clean`), não o validador: `validate_raw` e `validate_clean`
-respondem se o dado serve, sem tocar em disco.
+## O que está pronto
 
-### Conhecer antes de validar
-
-As faixas saem do profiling, não de chute:
-
-```bash
-uv run python scripts/profiling.py            # observado vs. o que o contrato exige
-uv run python scripts/profiling.py --html     # + o relatório completo do ydata-profiling
-```
-
-```
-coluna                 min       max     média   contrato
-tenure                0.00     72.00     36.48   ≥ 0 e ≤ 72
-MonthlyCharges       18.25    118.75     68.68   > 0 e ≤ 200.0
-```
-
-```
-relação TotalCharges ≈ tenure × MonthlyCharges (tenure > 1):
-  desvio mediano 1.5%, máximo 3.0%  — contrato tolera 10%
-```
-
-O `--html` gera o relatório completo do encontro (correlações, alertas,
-distribuições) em `artifacts/profiling.html`. O `ydata-profiling` **não** está no
-`pyproject.toml` de propósito: como dependência do projeto ele puxa numpy e scipy
-para versões mais antigas, e o lock é único — uma ferramenta de relatório passaria
-a ditar a pilha numérica do treino, justo o que os Encontros 2 e 3 travaram. Ele
-roda em ambiente efêmero (`uvx`), sem encostar no ambiente travado.
-
-A faixa de `MonthlyCharges` é a do encontro — 18–119, o observado arredondado
-para fora. É uma faixa colada no dado: pega `999`, `-1` e `1e6`, e também
-reprovaria o dataset no dia em que um plano novo custasse 130. A tolerância de
-10% na relação é mais folgada porque o pior caso observado é 3%. E a relação é a
-regra mais forte do contrato: faixa isolada aprova `TotalCharges = 20` num
-cliente de 70 meses pagando 100 por mês; a relação não.
-
-A `Config` também é a do encontro — `coerce = True`, `strict = False`. A
-comodidade tem preço, e o próprio encontro avisa qual: `tenure = 12.7` não
-reprova, vira `12` em silêncio (há um teste fixando isso). O que segura o
-estrago é validar em dois pontos — o que a coerção esconde no CSV cru, o schema
-do dado limpo cobra num tipo já definido. Coluna **faltando** continua sendo
-erro; `strict=False` tolera só a coluna a mais. "Comece frouxo, aperte com o tempo" — o aperto que vale a pena aqui é
-o `strict=True`, porque coluna nova neste dataset é sintoma de extração errada.
-
-### Erro ou alerta: nem toda violação é a mesma coisa
-
-Categoria nova em produção é o atrito clássico do encontro — o `isin` reprova um
-valor que é legítimo. Só que tratar *toda* categoria como alerta desarma o
-contrato. O corte aqui é por consequência, não por gosto:
-
-| Coluna | Valor novo significa | Severidade |
+| Encontro | Entrega | Onde |
 |---|---|---|
-| `InternetService`, `PaymentMethod` | o negócio lançou algo (5G, Pix) — o cliente é real, a linha está certa | **alerta**: passa, registra, alguém decide se o schema cresce |
-| `Contract` | mudou a feature nº 1 do modelo (importância 0,175 — 3,7× `PaymentMethod`) | **erro**: seguir treinando é pior que parar |
-| `Churn` | o alvo virou outra coisa | **erro** |
-| binários e derivados (`gender`, add-ons, `MultipleLines`…) | um terceiro valor onde só existem dois | **erro**: é corrupção, não lançamento |
+| 2 | config como contrato (Pydantic), pacote modular, ambiente travado (uv) | `config.py`, `pyproject.toml` |
+| 3 | reprodutibilidade em container; dado por volume, nunca em camada | `Dockerfile`, `compose.yml` |
+| 4 | contrato dos dados executável, com quarentena e alerta vs. erro | `schema.py`, `validation.py`, `quarentena.py` |
+| 5 | dado versionado por ponteiro; duas versões; deploy por `dvc pull` | `data/churn.csv.dvc`, `dvc.yaml` |
+| 6 | cada treino vira run, com linhagem `data_md5` + `git_commit` | `model.py`, `experiments.py`, `lineage.py` |
+| 7 | promoção a `@champion` com portão de métrica e rollback por alias | `registry.py` |
+| — | **ajuste fino**: busca aleatória em seis eixos | `tuning.py` |
+| — | **API**: o campeão atrás de HTTP, com contrato gerado do schema | `api.py` |
+| — | **front v1 e v2**: ver o projeto, e calcular o churn | `app/` |
 
-O alerta é `raise_warning=True` no `Field`, e `validation.py` o registra em log e
-o reemite — alerta que ninguém lê é validação que não valida. Alerta e erro
-convivem no mesmo passe: uma linha com `PaymentMethod = "Pix"` **e** `tenure =
-999` reprova pelo `tenure` e avisa do `Pix`, no mesmo relatório.
+---
 
-### Quebrar de propósito
+## Como rodar
 
-O contrato só vale se alguém já o viu pegar alguma coisa:
-
-```bash
-uv run python scripts/quebra_proposital.py
-```
-
-São três atos: valida o dataset real (tem de passar), adultera **uma** linha com
-`tenure = 999` e `Contract = "Vitalício"` (tem de reprovar), e por fim põe
-`PaymentMethod = "Pix"` (tem de passar, com alerta). O relatório do segundo ato:
-
-```
-  column       check                                failure_case
-  Contract     isin(['Month-to-month', 'One year',… Vitalício
-  tenure       less_than_or_equal_to(72)            999
-
-  o contrato pegou as duas de uma vez (lazy=True). ✓
-```
-
-As duas violações num relatório só é o `lazy=True` fazendo efeito. O script sai
-com código 1 se o dado adulterado passar, se a categoria de catálogo derrubar o
-pipeline, ou se ela passar em silêncio — os três modos de o contrato estar
-errado. Por isso ele roda no CI, junto dos testes que sujam uma coisa de cada vez
-(`tests/test_validation.py`).
-
-### Por que as 11 linhas em branco não foram descartadas
-
-`TotalCharges` vem em branco em 11 das 7043 linhas. Todas têm `tenure == 0`:
-são clientes que ainda não fecharam o primeiro ciclo de cobrança, cujo total
-acumulado é 0 de verdade — 4 delas são churners, e jogá-las fora tiraria sinal
-da classe minoritária. Em vez de excluir, o schema **exige** a relação: branco
-com `tenure > 0` é corrupção e reprova o dataset.
-
-Onde cada etapa do Data Pipeline mora no projeto: [`docs/data-pipeline.md`](docs/data-pipeline.md).
-
-## Versionamento de dados (Encontro 5)
-
-O CSV saiu do Git. O que o Git versiona agora é `data/churn.csv.dvc` — md5,
-tamanho e caminho — e os bytes ficam no cache do DVC e no *remote*.
-
-| | antes (Enc. 2–4) | agora |
-|---|---|---|
-| quem guarda os bytes | Git | cache do DVC + remote |
-| o que entra no commit | 981 KB de CSV | 3 linhas de ponteiro |
-| trocar de dataset | diff binário ilegível | uma linha de md5 mudando |
-| conferir integridade | à mão | `dvc status` |
+### Na sua máquina
 
 ```bash
-uv sync --group data   # instala o dvc (fora do grupo padrão: o container não precisa)
-uv run dvc pull        # traz o dado a partir do remote
-uv run dvc status      # o arquivo no disco ainda bate com o ponteiro?
-uv run dvc push        # manda para o remote o que você acabou de rastrear
+uv sync                               # ambiente travado pelo uv.lock
+./scripts/fetch_data.sh               # traz data/churn.csv (o Git não o guarda)
+
+uv run python -m churn.tuning         # busca + treina o vencedor  (~2 min)
+uv run python -m churn.registry       # registra e promove a @champion
+
+uv run --group api uvicorn churn.api:app         # API  → localhost:8000/docs
+uv run --group app streamlit run app/Inicio.py   # front → localhost:8501
 ```
 
-Ciclo de troca de dataset: substitua `data/churn.csv`, rode `dvc add
-data/churn.csv` (o `.dvc` muda), `dvc push` (os bytes sobem) e commite o `.dvc`.
-
-### Duas versões registradas
-
-| | clientes | md5 | accuracy | roc_auc | |
-|---|---|---|---|---|---|
-| **v1** | 7043 | `d390bd07…` | 0,7570 | 0,8053 | ← **versão rastreada** |
-| v2 | 7143 | `f150a64a…` | 0,7609 | 0,8150 | exercício do `dvc checkout` |
-
-A v2 é a v1 mais 100 clientes: `scripts/gerar_v2.py` sorteia 100 clientes
-existentes com semente fixa e os recadastra com identificador novo, copiando o
-resto da linha byte a byte. Isso dá duas propriedades boas — a v2 nasce cumprindo
-o contrato do Encontro 4, e os bytes são iguais em qualquer máquina.
-
-> **A v2 não serve para treinar.** Aquelas 100 linhas são cópias exatas de
-> clientes reais, só com `customerID` trocado. O split é aleatório por linha,
-> então cliente e cópia caem em lados diferentes: medimos **44 pares** com uma
-> metade no treino e a outra no teste. São 44 linhas que o modelo já viu, byte a
-> byte, contadas como acerto — e é daí que vem o `roc_auc` maior, não de um
-> modelo melhor. A v1 reproduz exatamente os números do material
-> (`roc_auc 0,8195`, `accuracy 0,7683`, `f1 0,6151`); a v2 infla em +0,0026.
->
-> Por isso a **v1 é a versão rastreada**, e o `registry.candidato()` filtra por
-> `tags.data_md5`: um run treinado sobre outra versão do dataset não compete por
-> uma vaga em produção. A v2 continua no histórico para o `dvc checkout` do
-> encontro — é exercício de versionamento, não base de treino.
-
-As métricas mudam entre as duas. É exatamente a pergunta do encontro: *dois
-modelos, duas acurácias — qual CSV gerou qual?* A resposta agora é o commit, que
-carrega código e ponteiro juntos.
-
-### Alternar entre elas
-
-São dois movimentos, e essa é a parte que costuma escapar:
+Outros pontos de entrada:
 
 ```bash
-git checkout <commit> -- data/churn.csv.dvc   # o Git traz o PONTEIRO
-uv run dvc checkout                           # o DVC traz os BYTES
+uv run python -m churn.model          # um treino simples
+uv run python -m churn.experiments    # o grid do Encontro 6: 9 runs
+./scripts/mlflow_ui.sh                # a UI em localhost:5000
+uv run python scripts/relatorio.py --html   # os runs sem navegador nem servidor
+uv run python scripts/prever.py --n 10      # prever em lote, pela linha de comando
+uv run python scripts/conferir_api.py       # a API está servindo mesmo?
+uv run pytest                         # 122 testes
 ```
 
-O Git sozinho troca 100 bytes de texto: sem o segundo comando o CSV no disco
-ainda é o da versão anterior, e o repositório passa a mentir sobre qual dado
-está ali (`dvc status` acusa). O script faz os dois e confere o md5 no fim:
-
-```bash
-./scripts/alternar_versao.sh v1     # 7043 clientes
-./scripts/alternar_versao.sh v2     # 7143 clientes
-```
-
-Ele acha o commit pelo hash do conteúdo, não por número de commit — que muda a
-cada rebase. O CI roda o ciclo inteiro (v1 → v2) a cada push: é o checkpoint do
-encontro virando teste.
-
-### O pipeline em `dvc.yaml`
-
-O `dvc add` versiona o dado; o `dvc.yaml` versiona a **relação** entre dado,
-código e modelo:
-
-```yaml
-stages:
-  treino:
-    cmd: uv run python -m churn.model
-    deps: [data/churn.csv, src/churn]
-    outs: [artifacts/churn_model.pkl]
-```
-
-```bash
-uv run dvc repro     # roda só o que mudou; grava o dvc.lock
-uv run dvc dag       # desenha as dependências
-```
-
-O `dvc.lock` guarda o hash exato de cada entrada e da saída — é a cadeia
-**dados → código → modelo** escrita por quem a executou. Trocar para a v1 muda o
-hash de `data/churn.csv`, e o `dvc repro` sabe sozinho que o modelo ficou velho.
-Sem mudança nenhuma ele não reexecuta nada (`Stage 'treino' didn't change`).
-
-O `.dvcignore` exclui `__pycache__/`: sem isso o hash de `src/churn` mudaria a
-cada execução e o `repro` reexecutaria o treino sem nada ter mudado.
-
-### O remote
-
-O padrão é um diretório local, irmão do repositório:
-
-```ini
-['remote "storage"']
-    url = ../../dvc-storage      # relativo a .dvc/config, isto é: <repo>/../dvc-storage
-```
-
-Serve para exercitar o fluxo sem credencial nenhuma, mas não atravessa máquinas.
-Para um remote de verdade, uma linha resolve — o resto do fluxo não muda:
-
-```bash
-uv run dvc remote add -d storage s3://meu-bucket/churn   # ou gdrive://, azure://, ssh://
-uv run dvc remote modify --local storage ...             # credenciais em .dvc/config.local (não versionado)
-```
-
-### O deploy: o dado vem por `dvc pull`
-
-`Dockerfile.dados` é uma imagem com o DVC e o ponteiro — sem os bytes. Ela roda
-`dvc pull`, escreve o CSV no volume compartilhado e sai; a imagem de treino,
-enxuta e sem DVC dentro, encontra o dado montado. É o `docker compose up`:
-
-```yaml
-dados:   # roda primeiro, busca o dado
-  build: {dockerfile: Dockerfile.dados}
-  volumes: [./data:/app/data, ../dvc-storage:/dvc-storage]
-  command: pull
-treino:
-  depends_on: {dados: {condition: service_completed_successfully}}
-```
-
-O remote é montado em `/dvc-storage` porque é para lá que o `../../dvc-storage`
-da config aponta, visto de `/app/.dvc/config`. Dentro da imagem não há `.git` —
-ela é o deploy, não o repositório — então o build liga `core.no_scm`.
-
-O CI prova o caminho inteiro em vez de afirmá-lo: semeia o remote com o próprio
-DVC dentro do container, **apaga** `data/churn.csv`, e um container novo tem de
-trazê-lo de volta do remote com o md5 batendo com o ponteiro.
-
-### E quem clona hoje?
-
-Um remote local não viaja junto com o clone. Por isso existe
-`scripts/fetch_data.sh`: tenta `dvc pull` e, se não houver remote alcançável,
-recupera a v1 do blob que ficou no histórico do Git (o dataset esteve versionado
-até o Encontro 5) e, se o ponteiro pedir a v2, roda `scripts/gerar_v2.py` para
-chegar nela. Em qualquer caminho **confere o md5 contra o `.dvc`**. É como o CI
-materializa o dado — sem DVC instalado e sem remote, só `git` e a biblioteca
-padrão do Python.
-
-## Rastreamento de experimentos (Encontro 6)
-
-O `print(accuracy)` mostra o número e o esquece. Cada execução do treino agora
-vira um **run**: o que foi escolhido, o que foi medido, o modelo e — a parte que
-fecha o bloco anterior — de qual dado e de qual código aquilo saiu.
-
-```bash
-uv run python -m churn.model         # um run
-uv run python -m churn.experiments   # o grid: 9 runs
-./scripts/mlflow_ui.sh               # a UI em localhost:5000
-```
-
-No Windows, onde o PowerShell não roda `.sh`, o equivalente é
-`uv run python scripts/preparar.py` — mesmo caminho, só a biblioteca padrão.
-
-E quando o navegador não alcança o `localhost` (proxy corporativo, porta
-bloqueada), `uv run python scripts/relatorio.py --html` escreve a mesma tabela
-num arquivo estático que abre com duplo clique.
-
-O `mlflow_ui.sh` faz o que falta antes de abrir: materializa o dataset se não
-estiver no disco, treina uma vez se ainda não houver run nenhum (UI vazia não
-mostra modelo), e só então sobe o servidor no mesmo backend que o treino usa.
-Quem prefere container: `docker compose up mlflow`.
-
-> O caminho dos artefatos é gravado **absoluto** no banco. Runs criados no host
-> (artefatos em `<repo>/mlruns`) e runs criados em container (`/app/mlruns`) não
-> se misturam: as métricas aparecem nos dois casos, mas o link do artefato só
-> resolve no mundo em que o run nasceu. Escolha um e fique nele.
-
-**Duas coisas que confundem ao abrir a UI 3.16 pela primeira vez** — as duas
-custaram tempo aqui, então ficam registradas:
-
-- Ela **abre na aba GenAI** (traces, judges, playground), que não tem nada a ver
-  com este projeto e aparece vazia. Os runs estão em **"Model training"**, no
-  canto superior esquerdo, ou direto em `#/experiments/1/runs`.
-- As **colunas de métrica não vêm ligadas**. A tabela mostra só nome, data e
-  duração; para ver `roc_auc`, `accuracy` e as tags de linhagem, use o botão
-  **Columns**. Para ordenar sem clicar em nada, o endereço aceita os parâmetros:
-
-  ```
-  #/experiments/1/runs?orderByKey=metrics.roc_auc&orderByAsc=false
-  ```
-
-A telemetria do MLflow 3 (`config.mlflow-telemetry.io`) fica desligada por
-`MLFLOW_DISABLE_TELEMETRY` — num projeto de curso ela não serve para nada.
-
-A regra que evita a confusão de sempre:
-
-| | é | exemplo aqui |
-|---|---|---|
-| **param** | o que **você escolheu** | `n_estimators`, `test_size`, `max_depth` |
-| **metric** | o que **você mediu** | `roc_auc`, `accuracy`, `f1` |
-| **artifact** | um **arquivo** gerado | o modelo, o pickle com o encoder |
-| **tag** | **metadado** do run | `data_md5`, `git_commit` |
-
-A config Pydantic vira params numa linha (`cfg.model_dump()`) — os dois contratos
-do curso se encontram aqui. Fora as chaves `mlflow_*`: elas dizem *onde anotar*,
-não *o que foi treinado*.
-
-### A linhagem: onde o DVC e o MLflow se costuram
-
-```
-data_md5   d390bd07b5514a2256a2396993b8b0e3   ← o ponteiro .dvc (Encontro 5)
-git_commit d7ee6e5                            ← o commit do código
-```
-
-`src/churn/lineage.py` lê as duas respostas e o treino as grava como tags. Dentro
-do container não há `.git` — a imagem carrega o código, não o repositório —, então
-quem sabe o commit informa: `CHURN_GIT_COMMIT` tem precedência, e o CI passa o
-`GITHUB_SHA` do job. Sem isso, a metade "qual código" ficaria em branco justamente
-no modelo que o CI produz. O DVC responde "qual dado e qual código"; o MLflow responde "qual experimento, com
-quais params e métricas"; a tag é o fio entre eles. Sem ponteiro `.dvc` por perto,
-`data_md5()` cai no md5 do próprio arquivo — mesma resposta, sem a garantia de
-que a versão está registrada. E `git_commit()` marca `+alteracoes` quando há
-mudança não commitada: um run treinado sobre código não commitado aponta para um
-commit que não contém aquele código, e a tag precisa dizer isso. (O Git chama
-esse estado de *dirty*; aqui "sujo" já é o dado fora do contrato do Encontro 4,
-então o marcador usa outra palavra de propósito.)
-
-O CI cobra esse fio a cada push (`scripts/conferir_run.py`): o run tem de existir,
-ter métricas, e a tag `data_md5` tem de bater com o md5 do ponteiro. Um modelo
-treinado com outro dado que não o versionado reprova o build.
-
-### O que o grid achou
-
-| run | n_estimators | max_depth | roc_auc | accuracy |
-|---|---|---|---|---|
-| **rf-n500-d8** | 500 | 8 | **0,8220** | 0,7749 |
-| rf-n200-d8 | 200 | 8 | 0,8220 | 0,7727 |
-| rf-n100-d8 | 100 | 8 | 0,8215 | 0,7732 |
-| *rf* (o default) | 200 | — | 0,8150 | 0,7609 |
-
-Podar a árvore em 8 níveis vale mais que triplicar o número delas — e o default
-atual (sem poda) perde para as nove combinações com `max_depth` definido. O campo
-`max_depth` existe na config para que o vencedor seja dizível (`CHURN_MAX_DEPTH=8`),
-mas **promover** o vencedor é assunto do Encontro 7, com o Model Registry.
-
-Os runs do grid ficam aninhados sob um run-pai: a varredura é uma coisa só na UI.
-E o modelo não é logado nos nove — são florestas de até 500 árvores, e guardar
-todas custa centenas de MB para comparar cinco números.
-
-### Rodar o modelo
-
-O run guarda o modelo; para usá-lo não é preciso escrever Python:
-
-```bash
-uv run python scripts/prever.py              # 5 clientes do dataset
-uv run python scripts/prever.py --n 20
-uv run python scripts/prever.py --csv clientes.csv
-uv run python scripts/prever.py --uri models:/m-abc123
-```
-
-```
-customerID  tenure       Contract real churn  probabilidade  acertou
- 7004-MAFB       8 Month-to-month  Yes   Yes          0.815     True
- 7001-QKTG      16       Two year   No    No          0.035     True
-```
-
-A entrada é a linha **crua**, com `customerID` e `TotalCharges` em texto, como
-sai do sistema de origem. Isso não é detalhe: o estimador sozinho recusa essa
-linha —
-
-```
-ValueError: The feature names should match those that were passed during fit.
-```
-
-— porque foi treinado com features derivadas e categóricas já codificadas. Por
-isso o que vai para o MLflow é o **pipeline inteiro** (`churn.serving`,
-`pyfunc`): limpeza, features, encoder e estimador num objeto só, na mesma ordem
-que o treino usou. Ordem diferente aqui seria *training/serving skew* — o modelo
-veria em produção um dado diferente do que viu no treino.
-
-O pacote vai dentro do artefato (`code_paths`), então o modelo carrega onde o
-projeto não está instalado. Para servir como HTTP em vez de rodar em lote:
-
-```bash
-uv run mlflow models serve -m runs:/<run_id>/model --env-manager local
-curl -X POST localhost:5000/invocations -H 'Content-Type: application/json' \
-  -d '{"dataframe_split": {"columns": [...], "data": [[...]]}}'
-```
-
-O CI roda o modelo a cada push: carrega do MLflow e prevê a partir de linhas
-cruas. Modelo que não roda reprova o build.
-
-### Dois desvios do material, por causa da versão instalada
-
-O guia foi escrito para o backend de arquivos (`./mlruns`) e para `artifact_path=`.
-Com **MLflow 3.16**:
-
-- **`./mlruns` é recusado.** O erro é explícito: *"the filesystem tracking backend
-  is in maintenance mode"*, e só abre exceção com `MLFLOW_ALLOW_FILE_STORE=true`.
-  O padrão aqui é `sqlite:///mlflow.db` — o caminho que o próprio MLflow
-  recomenda, e que o material já indica na tabela de backends. Os artefatos ficam
-  em `mlruns/`, tudo gitignored.
-- **`artifact_path=` virou `name=`** em `log_model`. Não é só um rename: o modelo
-  deixa de ser artefato do run e vira uma entidade própria (*logged model*).
-  Carregar continua funcionando pelos dois endereços — `runs:/<run_id>/model` e
-  `models:/<model_id>` —, e há um teste garantindo isso.
-
-E um desvio que não é da versão, é de projeto: o material loga
-`mlflow.sklearn.log_model(model, …)`, o estimador solto. Aqui o que se loga é o
-`pyfunc` do pipeline inteiro, pela razão da seção anterior — o estimador solto
-não aceita um cliente. O flavor sklearn continua lá dentro; o que muda é a
-fronteira do que foi empacotado.
-
-
-## Ajuste fino (`churn.tuning`)
-
-O grid varre nove pontos em dois eixos. A floresta tem mais botões, e os que
-ficaram de fora mexem no resultado tanto quanto a profundidade. A busca abre
-seis eixos e sorteia 24 das 3.150 combinações:
-
-```bash
-uv run python -m churn.tuning
-```
-
-Ela termina treinando o vencedor pelo caminho normal, então o que sai é um run
-promovível — não um relatório.
-
-### O que mudou no modelo
-
-Mesmo dado (v1), mesmo split, mesma semente. A diferença é só a configuração:
-
-| | padrão | ajustado | |
-|---|---|---|---|
-| roc_auc | 0.8053 | **0.8206** | +0.015 |
-| **recall** | 0.5602 | **0.7609** | **+0.20** |
-| f1 | 0.6000 | **0.6662** | +0.066 |
-| precision | 0.6459 | 0.5924 | −0.054 |
-| accuracy | 0.7570 | 0.7518 | −0.005 |
-
-A configuração vencedora: `n_estimators=200`, `max_depth=8`,
-`min_samples_leaf=16`, `min_samples_split=5`, `max_features=log2`,
-`class_weight=balanced`.
-
-O ganho que importa não é o `roc_auc`. É o **recall**: de 56% para 76% dos
-clientes que de fato cancelaram. Num problema de churn os dois erros não custam
-o mesmo — um falso positivo gasta um desconto, um falso negativo perde o
-cliente. Foi `class_weight=balanced` que comprou esses 20 pontos, pagando 5 de
-precisão. A acurácia caiu, e é por isso que ela não decide nada aqui: com 27% de
-churn na base, quem chuta "ninguém cancela" acerta 73%.
-
-### Três decisões que mudam o que o número significa
-
-**Busca aleatória, não exaustiva.** O grid completo das 3.150 combinações
-levaria horas para ganhar a terceira casa decimal. Sortear 24 pontos encontra
-quase sempre a mesma região, em minutos — o resultado de Bergstra & Bengio
-(2012), que vale justamente quando poucos hiperparâmetros dominam.
-
-**Validação cruzada no treino, teste intocado.** Escolher configuração olhando o
-teste é estudar com o gabarito. A busca pontua por CV dentro do treino; o teste
-aparece uma vez, no fim, para medir o vencedor. O `roc_auc` da CV e o do teste
-não batem — e não baterem é o esperado.
-
-**Mesmo split do resto do projeto.** A busca parte do mesmo
-`dados_codificados` que o grid, com a mesma semente. É o que torna os números
-das três varreduras comparáveis entre si.
-
-### Dizer o vencedor
-
-A busca imprime as variáveis que o reproduzem:
-
-```
-CHURN_N_ESTIMATORS=200   CHURN_MAX_DEPTH=8        CHURN_MAX_FEATURES=log2
-CHURN_MIN_SAMPLES_LEAF=16  CHURN_MIN_SAMPLES_SPLIT=5  CHURN_CLASS_WEIGHT=balanced
-```
-
-Repare no `null` quando um valor é nulo (`CHURN_MAX_DEPTH=null`). Vazio não
-serve: `CHURN_MAX_DEPTH=` levanta `ValidationError`, e `CHURN_MAX_FEATURES=`
-é pior — passa, vira a string vazia e treina **outro modelo**, calado. Quem
-resolve é `env_parse_none_str="null"` na `Settings`, e há teste amarrando as
-duas pontas.
-
-## Model Registry (Encontro 7)
-
-A varredura acha o melhor run. Semanas depois, "qual era mesmo?" não se responde
-rolando uma lista — e um run é um experimento, não um artefato de produção. O
-Registry dá o endereço estável.
-
-```bash
-uv run python -m churn.tuning     # 1. busca, e já treina o vencedor (run promovível)
-uv run python -m churn.registry   # 2. registra e promove
-```
-
-Pelo grid, se preferir os nove pontos do Encontro 6, o passo do meio é manual:
-
-```bash
-uv run python -m churn.experiments              # 1. acha a melhor configuração
-CHURN_MAX_DEPTH=8 uv run python -m churn.model  # 2. treina e loga o vencedor
-uv run python -m churn.registry                 # 3. registra e promove
-```
-
-Três peças: o **registered model** (`churn`) agrupa versões; cada **version** é
-imutável; o **alias** `@champion` é um ponteiro móvel para a que serve. Promover
-é mover o alias; reverter é movê-lo de volta — `registry.apontar(1)` devolve a
-produção à versão 1 sem treinar, sem registrar e sem tocar em servidor.
-
-Aliases e não stages: `Staging`/`Production` estão depreciados no MLflow 3.
-
-### Qual run é promovível
-
-Os filhos do grid pontuam mas **não logam modelo** — são nove florestas de até
-500 árvores, e a varredura existe para escolher a configuração, não para guardar
-candidatos. Quem loga o pipeline é o `churn.model`. Então `candidato()` filtra
-pelo nome de run do treino; promover um filho do grid falharia no artefato
-ausente, e a mensagem de erro manda rodar o treino em vez de estourar um
-traceback.
-
-### O portão
-
-`promover()` só registra se a métrica alcançar `mlflow_promocao_minima` (0.80).
-Abaixo disso levanta `PromocaoRecusada`. Um portão que deixa passar é pior que
-nenhum: dá a impressão de que alguém conferiu.
-
-### Consumir
-
-```python
-from churn.registry import carregar_campeao
-
-modelo = carregar_campeao()           # models:/churn@champion
-modelo.predict(cliente_cru)           # 21 colunas, como saem do sistema
-```
-
-Verificado de ponta a ponta: `churn v2 @champion`, treinado com `max_depth=8`
-sobre a **v1 real** do dataset (`roc_auc 0.8195`, `accuracy 0.7683`, `f1 0.6151`
-— os três iguais aos do material; `data_md5 d390bd07…`), carregado pelo alias e
-respondendo a uma linha crua com `churn` e `probabilidade`.
-
-A versão 1 do modelo registrado ficou para trás de propósito: ela veio de um run
-treinado sobre a v2, com a métrica inflada pelas linhas duplicadas. O filtro por
-`data_md5` passou a impedir que um run assim volte a ser promovido.
-
-### Uma pegadinha que custou uma depuração
-
-`carregar_campeao` precisa fixar a tracking URI **antes** do load. Sem isso o
-MLflow procura o registry no backend padrão e responde `Registered Model with
-name=churn not found` — com o modelo registrado. É o mesmo atrito de runs
-espalhados do Encontro 6, reaparecendo na hora de consumir. Há um teste de
-regressão travando a ordem das chamadas.
-
-
-## A API (`churn.api`)
-
-O Registry dá o endereço estável; a API dá a porta. Quem consome não instala o
-projeto, não conhece o MLflow e não sabe qual run venceu.
-
-```bash
-uv run --group api uvicorn churn.api:app --reload   # localhost:8000/docs
-```
-
-| rota | o que faz |
-|---|---|
-| `POST /prever` | um lote de clientes em JSON → rótulo e probabilidade, na ordem |
-| `GET /saude` | pronto para responder? é o que o healthcheck do compose pergunta |
-| `GET /modelo` | qual versão está servindo, e de qual run ela veio |
-| `GET /docs` | a documentação interativa, gerada do contrato |
-
-### O contrato de entrada não é escrito — é gerado
-
-Os campos que a API aceita saem do `ChurnRawSchema`, o mesmo contrato que valida
-o CSV no treino. Categoria vira `Literal` com os valores reais; faixa numérica
-vira `Field(ge=…, le=…)` com o piso e o teto do profiling.
-
-Uma lista paralela aqui seria *training/serving skew* na forma mais discreta: o
-dia em que o schema ganhasse uma categoria, a API continuaria recusando-a e
-ninguém ligaria os dois fatos. Há um teste que falha se os dois conjuntos
-divergirem. Efeito colateral melhor do que o esperado — o `/docs` sai com os
-domínios reais em cada campo, porque o OpenAPI vem da mesma fonte.
-
-### A assinatura que pedia a resposta de volta
-
-Na primeira chamada real, o modelo recusou:
-
-```
-Model is missing inputs ['customerID', 'Churn']
-```
-
-Para prever o churn era preciso **informar o churn**. A assinatura vinha de
-`infer_signature` sobre o CSV cru inteiro, e o MLflow trata assinatura como
-contrato: exige toda coluna declarada. O `ChurnPipeline` sempre descartou as
-duas colunas — só a assinatura não sabia. O defeito estava lá desde que o
-pipeline passou a ser logado, invisível porque o único teste de ponta a ponta
-mandava a linha completa, com `Churn` e tudo.
-
-Agora a assinatura sai de `entrada_de_servico(exemplo)`, e um teste lê a
-assinatura do modelo logado para garantir que o alvo nunca volte a ser exigido.
-
-## O front em Streamlit
-
-Duas páginas, duas versões.
-
-```bash
-uv run --group app streamlit run app/Inicio.py   # localhost:8501
-```
-
-**v1 — `app/Inicio.py`.** Título, código e dados. Não prevê nada, de propósito:
-um front que calcula antes de deixar ver o dado e o código vira uma caixa-preta
-bonita, e a caixa-preta é o que o curso passa doze encontros desmontando. O
-seletor mostra qualquer módulo de `src/churn/`; as abas mostram a tabela, o tipo
-de cada coluna e o resumo estatístico.
-
-**v2 — `app/pages/1_Prever_churn.py`.** Os parâmetros de um cliente e o churn
-calculado. O formulário é **gerado** do mesmo contrato: categoria vira
-`selectbox` com as opções reais, faixa vira `slider` com o piso e o teto. Não há
-como montar ali um cliente que a API recuse por domínio.
-
-O cálculo não acontece na página — ela chama a API. É o que separa o front do
-modelo: trocar de campeão é mover um alias, sem tocar numa linha do front.
-
-### `churn.contrato` — o contrato para quem não fala pandera
-
-A API e o formulário precisam da mesma informação (quais valores, qual faixa) e
-nenhum dos dois deveria aprender a ler `Check.statistics` por dentro. O
-`churn.contrato` traduz o schema em três perguntas — `permitidos`, `minimo`/
-`maximo`, `inteiro` — e é o que impede as duas telas de manterem cada uma a sua
-cópia da lista de categorias.
-
-Um detalhe que ele resolve: `TotalCharges` do formulário é **derivado** de
-`tenure × MonthlyCharges`. O contrato exige essa relação (10% de tolerância), e
-tomar o meio da faixa de cada campo isoladamente produzia um cliente de exemplo
-que violava a regra — quem abrisse a tela veria um aviso antes de digitar nada.
-
-## Tudo em Docker
+Os testes **não precisam do dataset** — usam amostras de `tests/conftest.py`.
+Quem precisa dele é o treino.
+
+> **Windows:** o PowerShell não roda `.sh`. Há três arquivos de duplo clique na
+> raiz — `ver-runs.bat`, `abrir-mlflow.bat` e `atualizar.bat` — e o equivalente
+> em Python puro para o resto: `uv run python scripts/preparar.py`. O passo a
+> passo completo está em [`docs/rodar-local.md`](docs/rodar-local.md).
+
+### Em Docker
 
 ```bash
 docker compose up dados       # 1. o CSV chega por dvc pull
@@ -769,48 +89,589 @@ docker compose up app         # 4. sobe a API e o front juntos
 | serviço | porta | o que é |
 |---|---|---|
 | `dados` | — | `dvc pull`; roda até o fim e sai |
-| `treino` / `tuning` | — | treino simples / busca + vencedor |
+| `treino` · `tuning` | — | treino simples · busca + vencedor |
 | `promover` | — | registra o melhor run e move o alias |
 | `api` | 8000 | o campeão atrás de HTTP |
 | `app` | 8501 | as duas páginas do front |
 | `mlflow` | 5000 | a UI dos experimentos |
 
-O `app` declara `depends_on: api (service_healthy)`, e "saudável" aqui significa
-**com modelo carregado**, não "a porta respondeu" — subir o front contra uma API
-sem campeão só adiantaria o erro para quem está olhando.
+O `app` declara `depends_on: api (service_healthy)`, e **saudável aqui significa
+com modelo carregado**, não "a porta respondeu". Subir o front contra uma API sem
+campeão só adiantaria o erro para quem está olhando.
 
-### A pegadinha do caminho absoluto
+---
+
+## Como a previsão melhorou
+
+Esta é a seção que responde "o que vocês fizeram para o modelo prever melhor".
+Ela tem três partes: o que mudou, quanto disso é mérito do modelo, e o que foi
+feito **no dado** para que a métrica não mentisse.
+
+### Os três estágios, medidos na mesma base
+
+Dataset v1 (7 043 clientes), mesmo split, mesma semente. Só a configuração muda:
+
+| | roc_auc | **recall** | f1 | precision | accuracy |
+|---|---|---|---|---|---|
+| padrão (Encontro 2) | 0,8053 | 0,5602 | 0,6000 | 0,6459 | 0,7570 |
+| grid (Encontro 6, `max_depth=8`) | 0,8195 | 0,5689 | 0,6151 | 0,6694 | **0,7683** |
+| **ajuste fino (6 eixos)** | **0,8206** | **0,7609** | **0,6662** | 0,5924 | 0,7518 |
+
+Configuração vencedora: `n_estimators=200`, `max_depth=8`, `min_samples_leaf=16`,
+`min_samples_split=5`, `max_features=log2`, `class_weight=balanced`.
+
+### O que foi feito, em ordem
+
+**1. Podar a árvore (Encontro 6).** O grid de nove pontos mostrou que limitar a
+profundidade em 8 vale mais que triplicar o número de árvores: `roc_auc` de
+0,8053 para 0,8195. Floresta sem poda decora o treino.
+
+**2. Abrir a busca para seis eixos (`churn.tuning`).** O grid varria
+`n_estimators` e `max_depth`. A floresta tem mais botões — amostras por folha,
+amostras por split, features por split, peso das classes — e eles mexem no
+resultado tanto quanto a profundidade. A busca sorteia 24 das 3 150 combinações,
+com validação cruzada **dentro do treino** e o teste intocado até o fim.
+
+**3. Pesar as classes.** `class_weight=balanced` é o que move o recall de 0,57
+para 0,76. Num problema de churn os dois erros não custam o mesmo: um falso
+positivo gasta um desconto, um falso negativo perde o cliente. O modelo passou a
+errar para o lado mais barato.
+
+### A ressalva honesta: quanto disso é modelo?
+
+Pouco. E vale dizer isso em vez de comemorar o recall.
+
+Contra o **melhor anterior** (não contra o padrão), o ganho de `roc_auc` é de
+**+0,0011** — ruído. `roc_auc` mede a capacidade de *ordenar* os clientes por
+risco, e essa capacidade praticamente não mudou.
+
+O que mudou foi o **ponto de operação**. E quase todo esse efeito se reproduz
+sem tocar no modelo, só baixando o corte de decisão. Medido:
+
+| no mesmo recall (0,7609) | precision | f1 | accuracy |
+|---|---|---|---|
+| modelo do grid, corte movido de 0,50 → **0,34** | 0,5860 | 0,6621 | 0,7473 |
+| modelo ajustado, corte em 0,50 | 0,5924 | 0,6662 | 0,7518 |
+
+A diferença real do ajuste fino, a recall igual, é **+0,006 de precisão**. O
+resto era alcançável com uma linha de `if probabilidade >= 0.34`.
+
+Isso não torna o ajuste inútil — ele entrega a mesma operação sem exigir que
+quem consome saiba calibrar corte, e os seis eixos confirmaram que a
+configuração do Encontro 6 já estava perto do teto deste modelo. Mas a frase
+honesta é: **o ganho foi de operação, não de capacidade preditiva.** Para mexer
+no `roc_auc` de verdade seria preciso trocar de família de modelo (gradient
+boosting) ou criar features novas — nenhum dos dois está neste escopo.
+
+Por isso o front mostra a **probabilidade** em destaque e diz, em texto, que o
+corte em 50% é convenção: para uma campanha com orçamento limitado, o que vale é
+ordenar a carteira por essa coluna e descer até o orçamento acabar.
+
+### O que protegeu a métrica no dado
+
+Melhorar a previsão não foi só mexer em hiperparâmetro. Três decisões no dado
+evitaram que o número subisse por motivo errado:
+
+- **As 11 linhas em branco não foram descartadas.** `TotalCharges` vem vazio em
+  11 das 7 043 linhas, todas com `tenure = 0`: clientes que não fecharam o
+  primeiro ciclo. Quatro são churners. Jogá-las fora tiraria sinal da classe
+  minoritária; em vez disso o contrato **exige** a relação (branco só com
+  `tenure = 0`).
+- **A v2 foi barrada do treino.** Ela tem 100 linhas que são cópias exatas de
+  clientes reais com `customerID` novo. Medimos **44 pares** com uma metade no
+  treino e a outra no teste — 44 linhas que o modelo já viu, byte a byte,
+  contadas como acerto. O `roc_auc` maior da v2 (0,8150 contra 0,8053) vem daí,
+  não de um modelo melhor.
+- **O Registry filtra por `data_md5`.** Depois desse episódio,
+  `registry.candidato()` só considera runs treinados sobre a versão do dataset
+  que o ponteiro `.dvc` aponta agora. Comparar métrica entre runs que viram
+  dados diferentes não compara nada — e a versão inflada chegou a ser promovida
+  uma vez, antes do filtro existir.
+
+---
+
+## Como foi implementado
+
+### Configuração e ambiente (Encontro 2)
+
+Todo caminho, hiperparâmetro e constante mágica vive em `config.py`, numa
+`BaseSettings` do Pydantic — sobrescrevível por `CHURN_*` ou `.env`. O script
+monolítico tinha `fillna(2200)` e caminhos fixos no meio da lógica.
+
+O ambiente é travado por `pyproject.toml` + `uv.lock`. Grupos de dependência
+separam o que cada imagem precisa: `data` (DVC), `api` (FastAPI, uvicorn), `app`
+(Streamlit), `dev` (pytest, httpx). A imagem de treino não carrega servidor HTTP
+nem Streamlit.
+
+### Container (Encontro 3)
+
+O `uv.lock` trava os pacotes Python; o container trava o resto — interpretador,
+SO, libs de sistema. Dados e artefatos entram por volume, nunca viram camada.
+
+```bash
+docker build -t churn:0.1 .
+docker run -v "$PWD/data:/app/data" -v "$PWD/artifacts:/app/artifacts" churn:0.1
+```
+
+A regra de ouro das camadas está nos quatro Dockerfiles: dependências **antes**
+do código, para que mudar um `.py` não reinstale o mundo.
+
+### Validação de dados (Encontro 4)
+
+O contrato é uma **classe** — `DataFrameModel` do pandera, a mesma intuição do
+Pydantic do Encontro 2: lá o contrato é da config, aqui é dos dados. Sendo
+código, ele versiona, é revisado em PR e roda no CI.
+
+O pipeline valida **duas vezes**: o CSV cru, antes de qualquer transformação, e o
+DataFrame limpo, antes de virar feature. A coerção acontece entre os dois, à
+vista.
+
+| Camada | Cobre |
+|---|---|
+| schema | as 21 colunas e seus tipos (`coerce=True`, `strict=False`) |
+| domínio | as categorias válidas de cada coluna, `customerID` único |
+| faixas | `tenure` 0–72, `MonthlyCharges` 18–119, `TotalCharges` ≥ 0 |
+| nulos | o alvo `Churn` nunca nulo |
+| coerência | sem internet ⇒ os 6 add-ons dizem `No internet service` |
+| relações | `TotalCharges` ≈ `tenure` × `MonthlyCharges` (±10%) quando `tenure > 1` |
+
+A relação é a regra mais forte: uma faixa isolada aprova `TotalCharges = 20` num
+cliente de 70 meses pagando 100 por mês; a relação não. É o que pega coluna
+invertida, valor truncado e unidade errada.
+
+As faixas saem do profiling, não de chute:
+
+```bash
+uv run python scripts/profiling.py            # observado vs. o que o contrato exige
+uv run python scripts/profiling.py --html     # o relatório do ydata-profiling
+```
+
+```
+numéricas: observado vs. contrato
+  coluna                 min       max     média   contrato
+  tenure                0.00     72.00     36.48   ≥ 0 e ≤ 72
+  MonthlyCharges       18.25    118.75     68.68   ≥ 18.0 e ≤ 119.0
+
+TotalCharges: texto no CSV — 11 brancos, 11 deles com tenure 0
+  numérico: 17.93 a 8269.27
+
+relação TotalCharges ≈ tenure × MonthlyCharges (tenure > 1):
+  desvio mediano 1.5%, máximo 3.0%  — contrato tolera 10%
+```
+
+**Erro ou alerta.** Tratar toda categoria nova como erro quebra o pipeline
+quando o negócio lança um produto; tratar toda como alerta desarma o contrato. O
+corte é por consequência:
+
+| Coluna | Valor novo significa | Severidade |
+|---|---|---|
+| `InternetService`, `PaymentMethod` | o negócio lançou algo (5G, Pix) | **alerta** — passa e registra |
+| `Contract` | mudou a feature nº 1 (importância 0,175) | **erro** |
+| `Churn` | o alvo virou outra coisa | **erro** |
+| binários e add-ons | um terceiro valor onde só existem dois | **erro** — é corrupção |
+
+Falha levanta `DataValidationError` em modo `lazy`: o relatório traz **todas** as
+violações de uma vez, e vem estruturado em `erro.failure_cases`. As três ações do
+encontro acontecem: falhar cedo, logar os `failure_cases` e **quarentenar** o
+lote em `artifacts/quarentena/<timestamp>/`.
+
+E o contrato só vale se alguém já o viu pegar alguma coisa:
+
+```bash
+uv run python scripts/quebra_proposital.py
+```
+
+Três atos — valida o dataset real (tem de passar), adultera uma linha com
+`tenure = 999` e `Contract = "Vitalício"` (tem de reprovar), e põe
+`PaymentMethod = "Pix"` (tem de passar, com alerta). Roda no CI.
+
+### Versionamento de dados (Encontro 5)
+
+O CSV saiu do Git. O que o Git versiona é `data/churn.csv.dvc` — md5, tamanho e
+caminho; os bytes ficam no cache do DVC e no remote.
+
+| | antes | agora |
+|---|---|---|
+| quem guarda os bytes | Git | cache do DVC + remote |
+| o que entra no commit | 981 KB de CSV | 3 linhas de ponteiro |
+| trocar de dataset | diff binário ilegível | uma linha de md5 mudando |
+
+Alternar entre versões são **dois** movimentos, e essa é a parte que escapa:
+
+```bash
+git checkout <commit> -- data/churn.csv.dvc   # o Git traz o PONTEIRO
+uv run dvc checkout                           # o DVC traz os BYTES
+```
+
+Sem o segundo, o CSV no disco ainda é o da versão anterior e o repositório passa
+a mentir sobre qual dado está ali. `./scripts/alternar_versao.sh v1` faz os dois
+e confere o md5 no fim.
+
+O `dvc.yaml` versiona a **relação** entre dado, código e modelo; o `dvc.lock`
+guarda o hash de cada entrada e da saída. Trocar de versão muda o hash do CSV, e
+`dvc repro` sabe sozinho que o modelo ficou velho.
+
+**O deploy:** `Dockerfile.dados` é uma imagem com o DVC e o ponteiro, sem os
+bytes. Ela roda `dvc pull`, escreve no volume e sai; a imagem de treino, sem DVC
+dentro, encontra o dado montado. O CI prova o caminho em vez de afirmá-lo: semeia
+o remote, **apaga** o CSV e exige que um container novo o traga de volta com o
+md5 batendo.
+
+### Rastreamento (Encontro 6)
+
+Cada execução vira um **run**: o que foi escolhido (params), o que foi medido
+(metrics), o modelo (artifact) e de onde aquilo veio (tags).
+
+| | é | exemplo aqui |
+|---|---|---|
+| param | o que você **escolheu** | `n_estimators`, `max_depth` |
+| metric | o que você **mediu** | `roc_auc`, `recall` |
+| artifact | um **arquivo** gerado | o pipeline `pyfunc` |
+| tag | **metadado** do run | `data_md5`, `git_commit` |
+
+A config Pydantic vira params numa linha (`cfg.model_dump()`) — os dois contratos
+do curso se encontram aí. Ficam de fora as chaves `mlflow_*` (dizem *onde
+anotar*, não o que foi treinado) e as `tuning_*` (descrevem uma busca que aquele
+run não fez).
+
+**A linhagem é onde o DVC e o MLflow se costuram:**
+
+```
+data_md5   d390bd07b5514a2256a2396993b8b0e3   ← o ponteiro .dvc (Encontro 5)
+git_commit d7ee6e5                            ← o commit do código
+```
+
+Dentro do container não há `.git`, então `CHURN_GIT_COMMIT` tem precedência e o
+CI passa o `GITHUB_SHA`. `git_commit()` marca `+alteracoes` quando há mudança não
+commitada — um run treinado sobre código não commitado aponta para um commit que
+não contém aquele código.
+
+### Promoção (Encontro 7)
+
+Um run é um experimento, não um artefato de produção. O Registry dá o endereço
+estável: o **registered model** (`churn`) agrupa versões, cada **version** é
+imutável, e o **alias** `@champion` é um ponteiro móvel para a que serve.
+
+Promover é mover o alias; reverter é movê-lo de volta — `registry.apontar(1)`
+devolve a produção à versão 1 sem treinar, sem registrar e sem tocar em servidor.
+Aliases e não stages: `Staging`/`Production` estão depreciados no MLflow 3.
+
+`promover()` só registra se a métrica alcançar `mlflow_promocao_minima` (0,80).
+Um portão que deixa passar é pior que nenhum: dá a impressão de que alguém
+conferiu.
+
+### A API
+
+```bash
+uv run --group api uvicorn churn.api:app   # localhost:8000/docs
+```
+
+| rota | o que faz |
+|---|---|
+| `POST /prever` | um lote de clientes em JSON → rótulo e probabilidade, na ordem |
+| `GET /saude` | pronto para responder? é o que o healthcheck pergunta |
+| `GET /modelo` | qual versão está servindo, e de qual run ela veio |
+| `GET /docs` | a documentação interativa, gerada do contrato |
+
+**O contrato de entrada não é escrito — é gerado** do `ChurnRawSchema`, o mesmo
+que valida o CSV no treino. Categoria vira `Literal` com os valores reais; faixa
+numérica vira `Field(ge=…, le=…)` com o piso e o teto do profiling.
+
+Uma lista paralela aqui seria *training/serving skew* na forma mais discreta: o
+dia em que o schema ganhasse uma categoria, a API continuaria recusando-a e
+ninguém ligaria os dois fatos. Há teste que falha se os dois conjuntos
+divergirem. Efeito colateral melhor que o esperado — o `/docs` sai com os
+domínios reais em cada campo.
+
+### O front
+
+```bash
+uv run --group app streamlit run app/Inicio.py   # localhost:8501
+```
+
+**v1 (`app/Inicio.py`)** — título, código e dados. Não prevê nada, de propósito:
+um front que calcula antes de deixar ver o dado e o código vira uma caixa-preta
+bonita, e a caixa-preta é o que o curso passa doze encontros desmontando. O
+seletor abre qualquer módulo de `src/churn/`; as abas mostram a tabela, o tipo de
+cada coluna e o resumo estatístico.
+
+**v2 (`app/pages/1_Prever_churn.py`)** — os 19 parâmetros de um cliente e o churn
+calculado. O formulário é gerado do mesmo contrato: categoria vira `selectbox`
+com as opções reais, faixa vira `slider` com o piso e o teto. Não há como montar
+ali um cliente que a API recuse por domínio.
+
+O cálculo não acontece na página — ela chama a API. É o que separa o front do
+modelo: trocar de campeão é mover um alias, sem tocar numa linha do front.
+
+**`churn.contrato`** nasceu da terceira cópia. A API e o formulário precisam da
+mesma informação e nenhum dos dois deveria aprender a ler `Check.statistics` por
+dentro; ele traduz o schema em `permitidos` / `minimo`-`maximo` / `inteiro`.
+
+---
+
+## Dificuldades encontradas
+
+Os erros que custaram tempo. Cada um está registrado porque o diagnóstico é a
+parte que não aparece no código final.
+
+### 1. O modelo exigia a resposta para dar a resposta
+
+Na primeira chamada real da API:
+
+```
+Model is missing inputs ['customerID', 'Churn']
+```
+
+Para prever o churn era preciso **informar o churn**. A assinatura do modelo
+vinha de `infer_signature` sobre o CSV cru inteiro, e o MLflow trata assinatura
+como contrato: exige toda coluna declarada. O `ChurnPipeline` sempre descartou as
+duas colunas — só a assinatura não sabia.
+
+O defeito existia desde que o pipeline passou a ser logado, **invisível porque o
+único teste de ponta a ponta mandava a linha completa**, com `Churn` e tudo. Foi a
+API, ao mandar o que um consumidor real mandaria, que o expôs. Hoje um teste lê a
+assinatura do modelo logado e falha se o alvo voltar a ser exigido.
+
+### 2. Três formas de o nulo virar outra coisa
+
+O `churn.tuning` imprime as variáveis que reproduzem o vencedor. Ao testar a
+própria instrução que ele imprimia:
+
+| | o que acontecia |
+|---|---|
+| `CHURN_MAX_DEPTH=` | `ValidationError` — `""` não é int |
+| `CHURN_MAX_FEATURES=` | **passa**, vira a string vazia e treina outro modelo, calado |
+| `CHURN_CLASS_WEIGHT=` | idem |
+
+O segundo é o perigoso: nenhum erro, modelo diferente. Sem
+`env_parse_none_str="null"` não havia como escrever o nulo por variável de
+ambiente, e metade dos campos opcionais ficava inatingível de fora. Um teste
+parametrizado agora amarra `como_variaveis` ao parser: mudar um sem o outro
+quebra no pytest.
+
+### 3. MLflow 3.16 não é o MLflow do material
+
+- **`./mlruns` é recusado**: *"the filesystem tracking backend is in maintenance
+  mode"*. O padrão virou `sqlite:///mlflow.db`.
+- **`artifact_path=` virou `name=`** em `log_model`, e não é só um rename: o
+  modelo deixa de ser artefato do run e vira *logged model*, com endereço
+  próprio.
+- **A UI abre na aba GenAI** (traces, judges, playground), vazia e sem relação com
+  o projeto. Os runs estão em **"Model training"**.
+- **As colunas de métrica não vêm ligadas** — a tabela mostra só nome, data e
+  duração. Use **Columns**, ou vá direto a
+  `#/experiments/1/runs?orderByKey=metrics.roc_auc&orderByAsc=false`.
+
+### 4. O caminho absoluto do artefato
 
 O MLflow grava o caminho do artefato **absoluto** no banco. Um modelo treinado no
-host (em `<repo>/mlruns`) não resolve dentro do container, e vice-versa: a API
-subiria e diria "sem modelo" sem nenhuma pista do porquê. Por isso a pilha treina
-no container — `tuning` e `api` compartilham o mesmo `/app/mlruns`.
+host (`<repo>/mlruns`) não resolve dentro do container (`/app/mlruns`): as
+métricas aparecem, mas o artefato não carrega — e a API sobe dizendo "sem modelo"
+sem nenhuma pista do porquê.
 
-Se você treinou no host e quer a API em Docker, escolha um mundo: ou tudo local
-(`uvicorn` direto), ou tudo em compose.
+Por isso a pilha do compose treina no container. Se você treinou no host, escolha
+um mundo: ou tudo local, ou tudo em compose.
 
-### O que o CI prova
+### 5. O registry que não achava o modelo registrado
 
-Os testes de unidade da API rodam dentro da imagem de treino — curiosamente, sem
-que ela instale o grupo `api`: o próprio MLflow depende de `fastapi`, então ele
-já está lá. (O que faltava era o `httpx` do `TestClient`, e por isso ele entrou
-no grupo `dev`.) O `importorskip` nos testes é guarda para um ambiente sincronizado
-sem os grupos padrão, não para este.
+`carregar_campeao` precisa fixar a tracking URI **antes** do load. Sem isso o
+MLflow procura o registry no backend padrão e responde `Registered Model with
+name=churn not found` — com o modelo registrado e visível na UI. É o mesmo atrito
+de runs espalhados do Encontro 6 reaparecendo na hora de consumir. Há teste de
+regressão travando a ordem das chamadas.
 
-A cobertura que o teste de unidade **não** dá é a do container: `docker compose`
-sobe a API, espera o healthcheck e roda `scripts/conferir_api.py` contra o
-serviço pela rede. É o que prova que a imagem constrói, carrega o campeão e
-serve — três coisas que nenhum `TestClient` em processo verifica.
+### 6. A métrica que subiu pelo motivo errado
 
-## O que mudou em relação ao `train_churn.py`
+A v2 do dataset dava `roc_auc` maior, e por um tempo isso pareceu progresso. Não
+era: as 100 linhas novas são cópias de clientes reais com identificador trocado,
+e 44 pares caíram com uma metade no treino e a outra no teste. O modelo acertava
+linhas que já tinha visto byte a byte.
 
-| Script monolítico | Projeto modular |
+Consequência prática: a versão 1 do modelo registrado foi promovida com métrica
+inflada. O filtro por `data_md5` em `registry.candidato()` existe por causa disso.
+
+### 7. Uma ferramenta de relatório ditando a pilha numérica
+
+`ydata-profiling` como dependência do projeto rebaixava numpy e scipy. Com lock
+único, uma ferramenta de relatório passaria a decidir a versão do numpy que
+treina o modelo — justo o que os Encontros 2 e 3 travaram. Ele roda em ambiente
+efêmero (`uvx`), sem encostar no ambiente travado.
+
+### 8. O `dvc repro` que rodava sem nada ter mudado
+
+`.dvcignore` não excluía `__pycache__/`. O hash de `src/churn` mudava a cada
+execução, e o `repro` retreinava o modelo por causa de bytecode.
+
+### 9. O registro de avisos que nunca terminava
+
+`warnings.catch_warnings(record=True)` devolve a lista **viva**. Reemitir um
+aviso enquanto se percorre essa lista o grava de volta nela, e o laço não termina
+— o pytest simplesmente travava. A correção é copiar (`list(capturados)`) e
+registrar **fora** do bloco.
+
+### 10. Atrito de ferramenta, que também custa tempo
+
+- **PowerShell não roda `.sh`**, e uma janela nova abre na pasta pessoal: três
+  rodadas de `not a git repository` antes de a causa ficar clara. Resolvido por
+  construção, com `.bat` que fazem `cd /d "%~dp0"`.
+- **`.bat` com quebra de linha do Unix quebra no `cmd`** — e quebra justamente
+  nos blocos `if errorlevel`, que é onde mora o tratamento de erro. O
+  `.gitattributes` marca `*.bat text eol=crlf`.
+- **Reescrever a branch no GitHub trava o clone de quem a acompanha**: o `git
+  pull` vira conflito sobre mudanças que não são de quem puxou. `atualizar.bat`
+  é a saída em um duplo clique.
+- **"sujo" já tinha dono.** O marcador de código não commitado se chamava
+  `-sujo`, e num projeto cujo Encontro 4 inteiro trata de *dado sujo* isso gerou
+  a pergunta "por que tem dado sujo?". Virou `+alteracoes`.
+
+---
+
+## Ressalvas e limites
+
+Onde este projeto **não** serve, dito antes que alguém descubra sozinho.
+
+### Sobre o modelo
+
+- **O ganho do ajuste fino é de operação, não de capacidade preditiva.** Contra o
+  melhor anterior, o `roc_auc` subiu 0,0011. Quase todo o salto de recall se
+  reproduz movendo o corte de 0,50 para 0,34 no modelo antigo — ver
+  [a seção acima](#a-ressalva-honesta-quanto-disso-é-modelo).
+- **A acurácia não decide nada aqui.** Com 33% de churn na base, quem chuta que
+  ninguém cancela já acerta 67% — mais do que a diferença entre qualquer duas
+  linhas da tabela acima. O modelo ajustado tem acurácia *menor* que o padrão e
+  é melhor para o problema.
+- **O corte em 50% é convenção**, não resultado. Quem usar isto para uma campanha
+  deve ordenar a carteira pela probabilidade e descer até o orçamento acabar.
+- **Um modelo melhor exigiria sair do escopo**: outra família (gradient boosting)
+  ou features novas. A Random Forest com estes dados está perto do seu teto.
+- **Não há monitoramento de drift.** O dataset é estático e fechado; um modelo em
+  produção de verdade precisaria vigiar a distribuição de entrada.
+
+### Sobre o contrato dos dados
+
+- **A faixa de `MonthlyCharges` (18–119) é colada neste dataset.** Ela pega 999,
+  −1 e 1e6 — e também reprovaria o dataset inteiro no dia em que um plano novo
+  custasse 130. É decisão consciente: faixa larga demais não ensina nada.
+- **`coerce=True` esconde sujeira.** `tenure = 12.7` não reprova: vira `12` em
+  silêncio (há teste fixando isso). O que segura o estrago é validar em dois
+  pontos — o que a coerção esconde no cru, o schema do limpo cobra num tipo já
+  definido.
+- **`strict=False` tolera coluna a mais.** Coluna *faltando* continua sendo erro.
+  O aperto que valeria a pena aqui é `strict=True`, porque coluna nova neste
+  dataset é sintoma de extração errada.
+- **A API valida coluna a coluna, não a relação entre elas.** `TotalCharges ≈
+  tenure × MonthlyCharges` é regra de DataFrame, e o Pydantic da API não a
+  aplica. Por isso o formulário **deriva** o total e avisa quando ele sai da
+  tolerância — mas uma chamada direta à API pode enviar um cliente incoerente e
+  receber uma previsão (que é extrapolação).
+
+### Sobre a infraestrutura
+
+- **O remote do DVC é um diretório local** (`../dvc-storage`). Exercita o fluxo
+  sem credencial nenhuma, mas **não atravessa máquinas**. Para um remote de
+  verdade basta uma linha (`dvc remote add -d storage s3://…`); o resto do fluxo
+  não muda.
+- **A API não tem autenticação** e roda com **um worker**. O modelo é carregado
+  por processo; quatro workers seriam quatro cópias da floresta na memória, para
+  um serviço de curso.
+- **Trocar de campeão exige reiniciar a API.** O pipeline é carregado uma vez, na
+  subida. É adequado aqui — num container, reiniciar *é* o deploy — mas não é
+  *hot reload*.
+- **Host e container não compartilham runs** (ver dificuldade nº 4).
+- **O portão de promoção (0,80) é um piso de sanidade, não uma meta.** Ele barra
+  um modelo quebrado, não um modelo medíocre.
+
+---
+
+## Testes e CI
+
+```bash
+uv run pytest          # 122 testes
+```
+
+Os testes não cobrem "o modelo acerta" — cobrem as **juntas** onde as coisas
+quebram caladas: o contrato traduzido diverge da fonte? o vencedor da busca
+sobrevive à viagem até o próximo treino? a assinatura exige o alvo? o padrão do
+formulário é aceito pela API?
+
+O CI (`.github/workflows/docker.yml`) roda a cada push e **prova** o que o README
+afirma, em vez de afirmá-lo:
+
+| Passo | O que prova |
+|---|---|
+| build + pytest no container | o ambiente travado reproduz fora da sua máquina |
+| `alternar_versao.sh v1 → v2` | dá para alternar entre versões, e o dado segue o ponteiro |
+| apaga o CSV e faz `dvc pull` | o dado vem do remote, não da imagem |
+| `quebra_proposital.py` | o contrato reprova o dado adulterado e alerta no catálogo |
+| treino no container | o dataset entra por volume |
+| `conferir_run.py` | o run existe e a tag `data_md5` bate com o ponteiro |
+| `prever.py` | o modelo **roda** a partir do MLflow, com linha crua |
+| `docker compose` + `conferir_api.py` | a imagem sobe, carrega o campeão e serve pela rede |
+
+O último é a cobertura que o teste de unidade não dá. Saída real do CI:
+
+```
+API: http://api:8000
+  ok   /saude responde 200 (200)
+  ok   modelo carregado ({'status': 'ok', 'versao': '1'})
+  ok   aponta para o alias, não para um run solto (models:/churn@champion)
+  ok   /prever responde 200 (200)
+  ok   recusa categoria fora do contrato (422)
+  ok   recusa tenure acima do teto (422)
+A API está servindo o modelo promovido.
+```
+
+---
+
+## Estrutura
+
+```
+prj_churn/
+├─ src/churn/
+│  ├─ config.py      # Settings (Pydantic) — caminhos, hiperparâmetros
+│  ├─ schema.py      # o contrato dos dados (pandera) — a fonte da verdade
+│  ├─ contrato.py    # o contrato traduzido: alimenta a API e o formulário
+│  ├─ validation.py  # executa o contrato e traduz a falha
+│  ├─ quarentena.py  # separa o lote reprovado em vez de treinar com ele
+│  ├─ data.py        # carga + validação + limpeza
+│  ├─ features.py    # transformações puras + encoder sem vazamento
+│  ├─ model.py       # treino (entrypoint) — instrumentado com MLflow
+│  ├─ experiments.py # o grid rastreado — 9 combinações
+│  ├─ tuning.py      # a busca aleatória em 6 eixos — o ajuste fino
+│  ├─ evaluate.py    # métricas
+│  ├─ lineage.py     # data_md5() e git_commit() — a costura com o DVC
+│  ├─ serving.py     # ChurnPipeline — o modelo que aceita cliente cru
+│  ├─ registry.py    # promove o vencedor a @champion
+│  └─ api.py         # FastAPI — o campeão atrás de HTTP
+├─ app/              # Streamlit: Inicio.py (v1) + pages/ (v2)
+├─ tests/            # 122 testes
+├─ scripts/          # preparar · relatorio · fetch_data · mlflow_ui · prever
+│                    # profiling · gerar_v2 · alternar_versao · quebra_proposital
+│                    # conferir_run · conferir_api
+├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
+├─ docs/             # rodar-local.md · data-pipeline.md
+├─ *.bat             # Windows: ver-runs · abrir-mlflow · atualizar
+├─ Dockerfile        # treino        Dockerfile.dados  # dvc pull no deploy
+├─ Dockerfile.api    # a API         Dockerfile.app    # o front
+├─ compose.yml       # dados · tuning · promover · api · app · mlflow
+├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
+└─ pyproject.toml    # deps travadas (uv), em grupos por imagem
+```
+
+---
+
+## Do script monolítico ao projeto
+
+| `train_churn.py` | o que está aqui |
 |---|---|
 | caminho hardcoded | `config.py` (Pydantic, sobrescrevível por env) |
-| `fillna(2200)` mágico | `TotalCharges` em branco → `0.0` (cliente novo, `tenure=0`) |
+| `fillna(2200)` mágico | `TotalCharges` em branco → `0.0` (cliente novo, `tenure = 0`) |
 | normalização por números mágicos | removida — Random Forest não precisa de escala |
-| validação ausente | `ChurnSchema` (pandera) no dado cru e no limpo |
+| validação ausente | contrato pandera no dado cru e no limpo, com quarentena |
 | `LabelEncoder` no dataset inteiro (vazamento) | `CategoricalEncoder` com `fit` só no treino |
 | sem `random_state` (acurácia instável) | semente fixa em split e modelo |
-| só imprime `accuracy` | `evaluate` retorna accuracy, precision, recall, f1, roc_auc |
+| só imprime `accuracy` | accuracy, precision, recall, f1, roc_auc — e um run por execução |
+| o dado no Git | ponteiro `.dvc`, bytes no remote |
+| "qual era o modelo bom?" | `models:/churn@champion` |
+| o modelo no notebook | API HTTP + front, em container |
 | tudo em nível de módulo | funções puras + orquestração em `train()` |
