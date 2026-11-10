@@ -71,10 +71,17 @@ def parametros(cfg: Settings) -> dict[str, object]:
     }
 
 
-def train(cfg: Settings = settings) -> tuple[RandomForestClassifier, dict[str, float]]:
-    """Executa o pipeline: dados -> features -> split -> encode -> treino -> avaliação.
+def ajustar(
+    cfg: Settings = settings,
+) -> tuple[RandomForestClassifier, CategoricalEncoder, dict[str, float]]:
+    """Dados -> features -> split -> encode -> treino -> avaliação. Sem MLflow.
 
-    Tudo o que acontece aqui é registrado num run do MLflow.
+    É o miolo do treino, separado do registro de propósito: quem só precisa de um
+    modelo ajustado — o modo demonstração do :mod:`churn.demonstracao`, por
+    exemplo — não deveria ter de subir um backend de tracking para consegui-lo.
+
+    Devolve o encoder junto porque sem ele o estimador não serve: foi ajustado
+    sobre categóricas já codificadas, e a inferência precisa da mesma codificação.
     """
     frame = add_derived_features(
         load_clean(cfg.data_path, cfg.id_column, cfg.target, cfg.quarantine_dir)
@@ -90,8 +97,16 @@ def train(cfg: Settings = settings) -> tuple[RandomForestClassifier, dict[str, f
     )
 
     encoder = CategoricalEncoder().fit(x_train)
-    x_train_cod, x_test_cod = encoder.transform(x_train), encoder.transform(x_test)
+    model = build_model(cfg).fit(encoder.transform(x_train), y_train)
+    return model, encoder, evaluate(model, encoder.transform(x_test), y_test)
 
+
+def train(cfg: Settings = settings) -> tuple[RandomForestClassifier, dict[str, float]]:
+    """O mesmo ajuste, registrado num run do MLflow.
+
+    O que acontece aqui e não em :func:`ajustar` é só o registro: params,
+    métricas, linhagem e o pipeline logado.
+    """
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
     mlflow.set_experiment(cfg.mlflow_experiment)
 
@@ -105,8 +120,7 @@ def train(cfg: Settings = settings) -> tuple[RandomForestClassifier, dict[str, f
         )
         mlflow.log_params(parametros(cfg))
 
-        model = build_model(cfg).fit(x_train_cod, y_train)
-        metrics = evaluate(model, x_test_cod, y_test)
+        model, encoder, metrics = ajustar(cfg)
         mlflow.log_metrics(metrics)
 
         # O que é logado é o pipeline inteiro (pyfunc), não o estimador solto:

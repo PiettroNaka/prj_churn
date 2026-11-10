@@ -120,3 +120,42 @@ def test_pipeline_aceita_a_linha_sem_id_e_sem_alvo(cfg, raw_frame):
     assert list(com_tudo.columns) == list(so_features.columns)
     assert "customerID" not in com_tudo.columns
     assert "gasto_por_mes" in com_tudo.columns
+
+
+def test_pipeline_aceita_colunas_fora_de_ordem(cfg, raw_frame):
+    """O sklearn compara feature_names_in_ posição a posição e recusa a chamada.
+
+    A ordem diverge com facilidade: o CSV lista `tenure` logo depois de
+    `Dependents`, o contrato o declara junto das outras numéricas, no fim. Montar
+    o cliente a partir do contrato — que é o que a API e o formulário fazem — já
+    produz a ordem "errada".
+
+    Isso passava despercebido porque o MLflow reordena pela assinatura antes de
+    chamar o modelo; só quem instancia o pipeline direto batia no erro. Agora o
+    pipeline se basta.
+    """
+    modelo, _ = train(cfg)
+
+    limpo = raw_frame.drop(columns=["customerID", "Churn"])
+    encoder = CategoricalEncoder().fit(add_derived_features(coerce_total_charges(limpo)))
+    pipeline = ChurnPipeline(modelo, encoder, "customerID", "Churn", "Yes")
+
+    invertido = limpo[list(reversed(limpo.columns))]
+
+    na_ordem = pipeline.predict(None, limpo)
+    fora_de_ordem = pipeline.predict(None, invertido)
+
+    assert list(fora_de_ordem["churn"]) == list(na_ordem["churn"])
+    assert fora_de_ordem["probabilidade"].tolist() == na_ordem["probabilidade"].tolist()
+
+
+def test_coluna_faltando_diz_qual(cfg, raw_frame):
+    """A mensagem do sklearn não diz qual coluna sumiu; esta diz."""
+    modelo, _ = train(cfg)
+
+    limpo = raw_frame.drop(columns=["customerID", "Churn"])
+    encoder = CategoricalEncoder().fit(add_derived_features(coerce_total_charges(limpo)))
+    pipeline = ChurnPipeline(modelo, encoder, "customerID", "Churn", "Yes")
+
+    with pytest.raises(ValueError, match="Contract"):
+        pipeline.predict(None, limpo.drop(columns=["Contract"]))

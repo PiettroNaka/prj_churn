@@ -161,48 +161,75 @@ st.divider()
 # o cálculo
 # --------------------------------------------------------------------------
 
-with st.sidebar:
-    st.subheader("API")
-    st.code(API, language=None)
-    try:
-        saude = requests.get(f"{API}/saude", timeout=3).json()
-    except requests.RequestException:
-        saude = None
+@st.cache_resource(show_spinner="Treinando o modelo local (primeira vez, ~20s)…")
+def _pipeline_local():
+    """O modo demonstração — ver :mod:`churn.demonstracao`. Treina uma vez só."""
+    from churn.demonstracao import pipeline_local
 
-    if saude is None:
-        st.error("Sem resposta.")
-    elif saude.get("status") == "ok":
-        st.success(f"No ar · modelo v{saude['versao']}")
+    return pipeline_local()
+
+
+def _saude_da_api() -> dict | None:
+    try:
+        return requests.get(f"{API}/saude", timeout=3).json()
+    except (requests.RequestException, ValueError):
+        return None
+
+
+saude = _saude_da_api()
+com_api = bool(saude and saude.get("status") == "ok")
+
+with st.sidebar:
+    st.subheader("De onde vem a previsão")
+    if com_api:
+        st.success(f"API · modelo v{saude['versao']}")
+        st.code(API, language=None)
+        st.caption(
+            "O campeão promovido no Registry, servido por HTTP. É o desenho do "
+            "projeto: trocar de modelo é mover um alias."
+        )
     else:
-        st.warning(saude.get("detalhe", "sem modelo"))
+        st.info("Modo demonstração")
+        st.caption(
+            "Sem API alcançável, o modelo é treinado aqui mesmo — mesmo dado, "
+            "mesma semente e mesmos hiperparâmetros, mas **sem** passar pelo "
+            "Registry. Para o caminho de verdade: `subir-front.bat` no Windows, "
+            "ou `docker compose up app`."
+        )
+        if saude is not None:
+            st.caption(f"A API respondeu, mas sem modelo: {saude.get('detalhe', '')}")
 
 if st.button("Calcular churn", type="primary", use_container_width=True):
-    try:
-        resposta = requests.post(f"{API}/prever", json=[cliente], timeout=30)
-    except requests.RequestException as erro:
-        st.error(f"Não consegui falar com a API em `{API}`.")
-        st.caption(str(erro))
-        st.info(
-            "Local: `uv run --group api uvicorn churn.api:app`. "
-            "No compose, a API sobe junto: `docker compose up app`."
+    if com_api:
+        try:
+            resposta = requests.post(f"{API}/prever", json=[cliente], timeout=30)
+        except requests.RequestException as erro:
+            st.error(f"Não consegui falar com a API em `{API}`.")
+            st.caption(str(erro))
+            st.stop()
+
+        if resposta.status_code != 200:
+            st.error(f"A API recusou a requisição ({resposta.status_code}).")
+            st.json(resposta.json())
+            st.stop()
+
+        (previsao,) = resposta.json()
+    else:
+        try:
+            pipeline, metricas = _pipeline_local()
+        except Exception as erro:  # noqa: BLE001 — a causa vai para a tela
+            st.error("Não consegui preparar o modelo local.")
+            st.caption(str(erro))
+            st.stop()
+
+        saida = pipeline.predict(None, pd.DataFrame([cliente]))
+        previsao = saida.iloc[0].to_dict()
+        st.caption(
+            f"Modelo treinado nesta sessão · roc_auc {metricas['roc_auc']:.4f} · "
+            f"recall {metricas['recall']:.4f}"
         )
-        st.stop()
 
-    if resposta.status_code == 503:
-        st.error("A API está no ar, mas sem modelo promovido.")
-        st.code(
-            "uv run python -m churn.tuning\nuv run python -m churn.registry",
-            language="bash",
-        )
-        st.stop()
-
-    if resposta.status_code != 200:
-        st.error(f"A API recusou a requisição ({resposta.status_code}).")
-        st.json(resposta.json())
-        st.stop()
-
-    (previsao,) = resposta.json()
-    probabilidade = previsao["probabilidade"]
+    probabilidade = float(previsao["probabilidade"])
 
     rotulo, risco = st.columns([1, 2])
     with rotulo:

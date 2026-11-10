@@ -61,6 +61,23 @@ ESPACO: dict[str, list[Any]] = {
 #: config do vencedor e imprimir as variáveis de ambiente equivalentes.
 HIPERPARAMETROS = tuple(ESPACO)
 
+#: O que esta busca encontrou na v1 do dataset, com a semente do projeto —
+#: ``roc_auc`` 0,8206 e ``recall`` 0,7609 no teste (ver o README).
+#:
+#: Não é verdade universal: outra versão do dado ou outra semente dariam outro
+#: vencedor, e é por isso que quem promove é o ``churn.registry``, olhando os
+#: runs. Ele está aqui para que quem precisa de um modelo bom *sem* rodar a
+#: busca — o modo demonstração do :mod:`churn.demonstracao` — não acabe
+#: exibindo uma configuração pior do que a que seria promovida.
+VENCEDOR: dict[str, Any] = {
+    "n_estimators": 200,
+    "max_depth": 8,
+    "min_samples_leaf": 16,
+    "min_samples_split": 5,
+    "max_features": "log2",
+    "class_weight": "balanced",
+}
+
 
 def espaco_total() -> int:
     """Quantas combinações existem — o denominador do que a busca amostra."""

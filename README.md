@@ -110,6 +110,37 @@ O `app` declara `depends_on: api (service_healthy)`, e **saudável aqui signific
 com modelo carregado**, não "a porta respondeu". Subir o front contra uma API sem
 campeão só adiantaria o erro para quem está olhando.
 
+### Publicar no Streamlit Community Cloud
+
+| campo | valor |
+|---|---|
+| Repository | `PiettroNaka/prj_churn` |
+| Branch | `main` |
+| Main file path | `app/Inicio.py` |
+
+Duas coisas tornam isso possível, e nenhuma delas é padrão num projeto que usa
+DVC e MLflow:
+
+**O `requirements.txt`.** A plataforma instala por pip, não por uv. A última
+linha dele é `.` — é o que instala o pacote a partir do `pyproject.toml` e faz
+`from churn.config import settings` funcionar. Sem ela o app quebra na primeira
+linha de import, antes de desenhar qualquer coisa.
+
+**O modo demonstração.** Na nuvem não há API, não há MLflow e não há o CSV, que
+saiu do Git no Encontro 5. O front detecta isso e se vira: busca o dataset por
+HTTP do commit em que ele ainda era versionado — **conferindo o md5 contra o
+ponteiro `.dvc`**, transporte diferente e mesma verificação — e treina o modelo
+na própria sessão, com a configuração que a busca encontrou.
+
+A barra lateral diz qual dos dois respondeu, sempre. Um número que sai de um
+modelo treinado na hora não é o mesmo que sai do campeão promovido, e quem olha
+tem o direito de saber qual é qual.
+
+> O modo demonstração é vitrine, não arquitetura. O desenho do projeto é
+> front → API → Registry, e é o que roda em `docker compose up app` ou no
+> `subir-front.bat`. Para apontar a vitrine para uma API hospedada de verdade,
+> basta definir `CHURN_API_URL` nos *secrets* da plataforma.
+
 ---
 
 ## Como a previsão melhorou
@@ -589,6 +620,9 @@ Onde este projeto **não** serve, dito antes que alguém descubra sozinho.
   subida. É adequado aqui — num container, reiniciar *é* o deploy — mas não é
   *hot reload*.
 - **Host e container não compartilham runs** (ver dificuldade nº 4).
+- **O modo demonstração não passa pelo Registry.** Ele treina na sessão, então
+  não há versão, não há alias e não há rollback — as três coisas que o Encontro
+  7 existe para dar. Serve para a vitrine pública; não serve como deploy.
 - **O portão de promoção (0,80) é um piso de sanidade, não uma meta.** Ele barra
   um modelo quebrado, não um modelo medíocre.
 
@@ -653,8 +687,10 @@ prj_churn/
 │  ├─ lineage.py     # data_md5() e git_commit() — a costura com o DVC
 │  ├─ serving.py     # ChurnPipeline — o modelo que aceita cliente cru
 │  ├─ registry.py    # promove o vencedor a @champion
-│  └─ api.py         # FastAPI — o campeão atrás de HTTP
+│  ├─ api.py         # FastAPI — o campeão atrás de HTTP
+│  └─ demonstracao.py # o modo vitrine: sem API, sem Registry, sem CSV no disco
 ├─ app/              # Streamlit: Inicio.py (v1) + pages/ (v2)
+├─ requirements.txt  # para plataformas que instalam por pip (Streamlit Cloud)
 ├─ tests/            # 122 testes
 ├─ scripts/          # preparar · relatorio · fetch_data · mlflow_ui · prever
 │                    # profiling · gerar_v2 · alternar_versao · quebra_proposital
