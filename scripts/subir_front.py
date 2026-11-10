@@ -97,7 +97,7 @@ def subir_api(porta: int) -> subprocess.Popen:
     raise SystemExit("ERRO: a API não respondeu a tempo.")
 
 
-def subir_front(porta: int, porta_api: int, navegador: bool) -> int:
+def subir_front(porta: int, porta_api: int, navegador: bool, endereco: str) -> int:
     passo(4, f"Streamlit em http://localhost:{porta}")
     print("      (Ctrl+C encerra os dois; deixe esta janela aberta)")
 
@@ -109,6 +109,7 @@ def subir_front(porta: int, porta_api: int, navegador: bool) -> int:
         [
             sys.executable, "-m", "streamlit", "run", "app/Inicio.py",
             "--server.port", str(porta),
+            "--server.address", endereco,
             "--server.headless", "false" if navegador else "true",
             "--browser.gatherUsageStats", "false",
         ],
@@ -124,6 +125,12 @@ def main() -> int:
     parser.add_argument(
         "--sem-navegador", action="store_true", help="não abrir o navegador sozinho"
     )
+    parser.add_argument(
+        "--endereco",
+        default="127.0.0.1",
+        help="em que interface o Streamlit escuta; 0.0.0.0 para aceitar de fora "
+        "(é o que um container precisa)",
+    )
     args = parser.parse_args()
 
     os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
@@ -132,7 +139,9 @@ def main() -> int:
     preparar_campeao()
     api = subir_api(args.porta_api)
     try:
-        return subir_front(args.porta, args.porta_api, not args.sem_navegador)
+        return subir_front(
+            args.porta, args.porta_api, not args.sem_navegador, args.endereco
+        )
     except KeyboardInterrupt:
         return 0
     finally:

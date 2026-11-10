@@ -77,16 +77,26 @@ def preparar_dado() -> None:
 
     print(f"      sem remote alcançável; recuperando a v1 do Git (blob {BLOB[:7]})")
     existe = _git("cat-file", "-e", BLOB)
-    if existe.returncode != 0:
-        raise SystemExit(
-            f"ERRO: o blob {BLOB} não está neste clone.\n"
-            "      Num clone raso, rode: git fetch --unshallow"
-        )
+    if existe.returncode == 0:
+        conteudo = _git("cat-file", "blob", BLOB)
+        DATASET.parent.mkdir(parents=True, exist_ok=True)
+        # bytes crus: nada de texto aqui, ou o Windows troca LF por CRLF e o md5 muda
+        DATASET.write_bytes(conteudo.stdout)
+    else:
+        # Clone raso não traz histórico, e é o que plataformas de deploy fazem.
+        # O mesmo commit continua servido por HTTP, e a verificação de md5 é a
+        # mesma — o que muda é só o transporte.
+        print("      clone sem histórico; buscando o mesmo commit por HTTP")
+        try:
+            from churn.demonstracao import baixar
 
-    conteudo = _git("cat-file", "blob", BLOB)
-    DATASET.parent.mkdir(parents=True, exist_ok=True)
-    # bytes crus: nada de texto aqui, ou o Windows troca LF por CRLF e o md5 muda
-    DATASET.write_bytes(conteudo.stdout)
+            baixar(DATASET, esperado)
+        except Exception as erro:  # noqa: BLE001 — a causa vai para a tela
+            raise SystemExit(
+                f"ERRO: não consegui materializar o dataset.\n"
+                f"      blob {BLOB[:7]} ausente (clone raso) e o download falhou: {erro}\n"
+                "      Com histórico completo: git fetch --unshallow"
+            ) from erro
 
     if not confere(esperado):
         print("      o ponteiro não é o da v1; reconstruindo a v2")
