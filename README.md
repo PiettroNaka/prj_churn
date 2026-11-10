@@ -141,6 +141,25 @@ tem o direito de saber qual é qual.
 > `subir-front.bat`. Para apontar a vitrine para uma API hospedada de verdade,
 > basta definir `CHURN_API_URL` nos *secrets* da plataforma.
 
+### Publicar no Hugging Face Spaces
+
+É o deploy que roda a **pilha inteira**, não só o front — e sem custo nem
+cartão. O Spaces expõe uma porta só, então os dois processos dividem um
+container em vez de o front passar a carregar modelo:
+
+```
+Streamlit (7860, pública)  →  FastAPI (127.0.0.1:8000)  →  modelo @champion
+```
+
+O repositório do Space tem **dois arquivos**, ambos em `deploy/spaces/`: o
+`Dockerfile` (que clona este repositório, instala, treina e promove) e o
+`README.md` com o cabeçalho que a plataforma lê. O passo a passo está em
+[`docs/deploy-huggingface.md`](docs/deploy-huggingface.md).
+
+O modelo é treinado e promovido **na construção da imagem**, com a configuração
+que a busca encontrou. O Space nasce com `churn v1 @champion` pronto, e a barra
+lateral do front diz "API · modelo v1" — ali não é modo demonstração.
+
 ---
 
 ## Como a previsão melhorou
@@ -696,7 +715,8 @@ prj_churn/
 │                    # profiling · gerar_v2 · alternar_versao · quebra_proposital
 │                    # conferir_run · conferir_api
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
-├─ docs/             # rodar-local.md · data-pipeline.md
+├─ deploy/spaces/    # Dockerfile + README do Hugging Face Spaces
+├─ docs/             # rodar-local.md · data-pipeline.md · deploy-huggingface.md
 ├─ *.bat             # Windows: subir-front · ver-runs · abrir-mlflow · atualizar
 ├─ Dockerfile        # treino        Dockerfile.dados  # dvc pull no deploy
 ├─ Dockerfile.api    # a API         Dockerfile.app    # o front

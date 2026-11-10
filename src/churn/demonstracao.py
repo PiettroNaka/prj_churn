@@ -31,9 +31,11 @@ import urllib.request
 from pathlib import Path
 
 from churn.config import Settings, settings
-from churn.evaluate import evaluate  # noqa: F401  (reexport por conveniência)
 from churn.lineage import data_md5, ponteiro_de
-from churn.serving import ChurnPipeline
+
+# O ChurnPipeline é importado dentro de `pipeline_local`, não aqui: ele arrasta
+# o mlflow junto, e quem só quer `garantir_dataset` — o scripts/preparar.py, por
+# exemplo — não deveria pagar esse import para baixar um CSV.
 
 #: O commit em que ``data/churn.csv`` ainda estava versionado pelo Git. É o
 #: mesmo blob que o ``scripts/preparar.py`` recupera do histórico local; aqui
@@ -91,7 +93,7 @@ def garantir_dataset(cfg: Settings = settings) -> Path:
     return caminho
 
 
-def pipeline_local(cfg: Settings = settings) -> tuple[ChurnPipeline, dict[str, float]]:
+def pipeline_local(cfg: Settings = settings) -> tuple["ChurnPipeline", dict[str, float]]:
     """Treina na hora e devolve o pipeline pronto para prever, com as métricas.
 
     Mesmo dado, mesmo split, mesma semente e mesmos hiperparâmetros do
@@ -99,6 +101,7 @@ def pipeline_local(cfg: Settings = settings) -> tuple[ChurnPipeline, dict[str, f
     mesmo; o que não existe é o endereço estável dele.
     """
     from churn.model import ajustar
+    from churn.serving import ChurnPipeline
     from churn.tuning import VENCEDOR
 
     garantir_dataset(cfg)

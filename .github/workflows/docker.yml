@@ -10,6 +10,52 @@ on:
   pull_request:
 
 jobs:
+  # O entregável do deploy: a imagem do Hugging Face Spaces, que roda a pilha
+  # inteira num container só. Job à parte porque ele constrói do zero (clone +
+  # uv sync + treino + promoção) e não tem por que atrasar o resto.
+  spaces:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # A imagem clona o repositório em vez de copiar o contexto, então o build
+      # tem de apontar para a ref DESTE job — senão o CI validaria a main
+      # enquanto a mudança a ser testada está na branch.
+      - name: Constrói a imagem do Space
+        run: |
+          docker build \
+            --build-arg REPO="${{ github.server_url }}/${{ github.repository }}" \
+            --build-arg REF="${{ github.head_ref || github.ref_name }}" \
+            -t churn-spaces:ci \
+            deploy/spaces
+
+      - name: Tamanho da imagem
+        run: docker images churn-spaces:ci --format "{{.Repository}}:{{.Tag}} {{.Size}}"
+
+      - name: O container sobe e o front responde
+        run: |
+          docker run -d --name spaces -p 7860:7860 churn-spaces:ci
+          for _ in $(seq 1 48); do
+            if curl -fsS http://localhost:7860/_stcore/health >/dev/null 2>&1; then
+              echo "front no ar"; exit 0
+            fi
+            sleep 5
+          done
+          echo "--- o front não respondeu; log do container ---"
+          docker logs spaces
+          exit 1
+
+      # O ponto do desenho: o front fala com a API, e a API serve o campeão
+      # promovido. Se isto passar, o Space não está em modo demonstração.
+      - name: A API interna serve o campeão promovido
+        run: |
+          docker exec spaces sh -c \
+            'cd /home/usuario/app && .venv/bin/python scripts/conferir_api.py'
+
+      - name: Derruba o container
+        if: always()
+        run: docker rm -f spaces || true
+
   build:
     runs-on: ubuntu-latest
     steps:
