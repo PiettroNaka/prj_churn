@@ -80,6 +80,31 @@ def test_modelo_logado_roda_com_cliente_cru(cfg, raw_frame):
     assert previsto["probabilidade"].between(0, 1).all()
 
 
+def test_assinatura_nao_exige_o_alvo_nem_o_identificador(cfg):
+    """Para prever o churn não se pode ser obrigado a informar o churn.
+
+    O MLflow trata a assinatura como contrato e exige TODA coluna declarada.
+    Inferindo-a do CSV cru inteiro, o modelo logado recusava qualquer chamada
+    real com ``Model is missing inputs ['customerID', 'Churn']`` — um modelo
+    impossível de usar, que só não aparecia porque o teste acima manda a linha
+    completa. O pipeline sempre descartou as duas colunas; faltava a assinatura
+    dizer o mesmo.
+    """
+    train(cfg)
+
+    mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
+    run_id = mlflow.search_runs(experiment_names=[cfg.mlflow_experiment]).iloc[0][
+        "run_id"
+    ]
+
+    entrada = mlflow.models.get_model_info(f"runs:/{run_id}/model").signature.inputs
+    declaradas = {campo.name for campo in entrada.inputs}
+
+    assert cfg.target not in declaradas, "a assinatura pede o alvo que vai prever"
+    assert cfg.id_column not in declaradas, "identificador não é feature"
+    assert "tenure" in declaradas, "as features de verdade continuam no contrato"
+
+
 def test_pipeline_aceita_a_linha_sem_id_e_sem_alvo(cfg, raw_frame):
     """Quem chama manda a linha que tem — com ou sem as colunas que não são feature."""
     modelo, _ = train(cfg)

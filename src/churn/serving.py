@@ -58,13 +58,21 @@ class ChurnPipeline(mlflow.pyfunc.PythonModel):
         # "não " colado na frente do positivo: a saída fala o vocabulário do dado
         self._negative_label = next(v for v in SIM_NAO if v != positive_label)
 
+    def entrada_de_servico(self, entrada: pd.DataFrame) -> pd.DataFrame:
+        """A linha como ela chega em produção: sem identificador e sem alvo.
+
+        As duas colunas são *toleradas* — quem chama manda a linha que tem, não
+        a que o modelo gostaria de receber — mas nenhuma das duas é entrada. O
+        ``customerID`` não é feature, e o ``Churn`` é o que se quer descobrir.
+        """
+        descartaveis = [
+            c for c in (self._id_column, self._target) if c in entrada.columns
+        ]
+        return entrada.drop(columns=descartaveis)
+
     def preparar(self, entrada: pd.DataFrame) -> pd.DataFrame:
         """Põe a linha crua no formato que o estimador espera."""
-        df = entrada.copy()
-        # id e alvo são tolerados na entrada: quem chama manda a linha que tem,
-        # não a linha que o modelo gostaria de receber
-        descartaveis = [c for c in (self._id_column, self._target) if c in df.columns]
-        df = df.drop(columns=descartaveis)
+        df = self.entrada_de_servico(entrada.copy())
         return self._encoder.transform(add_derived_features(coerce_total_charges(df)))
 
     def predict(self, context, model_input: pd.DataFrame, params=None) -> pd.DataFrame:
@@ -90,15 +98,24 @@ def log_pipeline(
     cfg: Settings,
     exemplo_cru: pd.DataFrame,
 ) -> mlflow.models.model.ModelInfo:
-    """Loga o pipeline no run corrente, pronto para carregar e para servir."""
+    """Loga o pipeline no run corrente, pronto para carregar e para servir.
+
+    A assinatura sai do exemplo **sem identificador e sem alvo**, não do CSV
+    cru inteiro. A diferença não é cosmética: o MLflow trata a assinatura como
+    contrato e exige toda coluna declarada. Inferir do CSV inteiro produzia um
+    modelo que recusava a chamada com ``Model is missing inputs ['customerID',
+    'Churn']`` — isto é, para prever o churn era preciso informar o churn. O
+    pipeline sempre descartou as duas; só a assinatura não sabia disso.
+    """
     pipeline = ChurnPipeline(
         modelo, encoder, cfg.id_column, cfg.target, cfg.positive_label
     )
+    exemplo = pipeline.entrada_de_servico(exemplo_cru)
     return mlflow.pyfunc.log_model(
         name=NOME_DO_MODELO,
         python_model=pipeline,
-        signature=infer_signature(exemplo_cru, pipeline.predict(None, exemplo_cru)),
-        input_example=exemplo_cru,
+        signature=infer_signature(exemplo, pipeline.predict(None, exemplo)),
+        input_example=exemplo,
         # o pacote vai dentro do artefato: sem isto o modelo só carrega onde o
         # projeto já estiver instalado, que é o oposto de "servir em qualquer
         # lugar"
