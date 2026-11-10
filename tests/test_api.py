@@ -6,7 +6,14 @@ o que entra, o que sai, e o que acontece quando não há modelo.
 """
 import pandas as pd
 import pytest
-from fastapi.testclient import TestClient
+
+# Guarda para um ambiente sincronizado sem os grupos padrão. Na imagem de
+# treino estes testes rodam: ela não instala o grupo `api`, mas o MLflow depende
+# de fastapi e já o traz. Quem cobre a API *como container* é o
+# scripts/conferir_api.py, contra o serviço de verdade pela rede.
+pytest.importorskip("fastapi", reason="fastapi ausente neste ambiente")
+
+from fastapi.testclient import TestClient  # noqa: E402
 
 from churn import api
 from churn.api import Cliente, app, estado

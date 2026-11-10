@@ -29,52 +29,33 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, create_model
 
 from churn.config import Settings, settings
+from churn.contrato import Campo, campos_de_entrada
 from churn.registry import carregar_campeao, versao_do_alias
-from churn.schema import ChurnRawSchema
-
-#: Colunas que o cliente NÃO manda: o identificador não é feature, e o alvo é
-#: justamente o que se quer descobrir.
-FORA_DA_ENTRADA = frozenset({"customerID", "Churn"})
 
 
-def _tipo_e_campo(coluna) -> tuple[Any, Any]:
-    """Traduz uma coluna do contrato pandera para ``(tipo, Field)`` do Pydantic.
+def _tipo_e_campo(campo: Campo) -> tuple[Any, Any]:
+    """Traduz um :class:`~churn.contrato.Campo` para ``(tipo, Field)`` do Pydantic.
 
-    Só três formas interessam, porque são as três que o contrato usa: domínio
-    fechado (``isin``) vira ``Literal``, faixa (``ge``/``le``) vira ``Field`` com
-    limites, e o resto vira o tipo nu.
+    Domínio fechado vira ``Literal`` — é o que faz o ``/docs`` sair com a lista
+    de opções em vez de uma caixa de texto livre.
     """
-    limites: dict[str, Any] = {}
-    for checagem in coluna.checks:
-        estatisticas = getattr(checagem, "statistics", None) or {}
-        if checagem.name == "isin":
-            permitidos = list(estatisticas["allowed_values"])
-            return Literal[tuple(permitidos)], Field(description=coluna.description)
-        if checagem.name == "greater_than_or_equal_to":
-            limites["ge"] = estatisticas["min_value"]
-        if checagem.name == "less_than_or_equal_to":
-            limites["le"] = estatisticas["max_value"]
+    if campo.permitidos is not None:
+        return Literal[campo.permitidos], Field(description=campo.descricao)
 
-    tipo = float if "float" in str(coluna.dtype) else int
-    return tipo, Field(description=coluna.description, **limites)
+    limites = {
+        chave: valor
+        for chave, valor in (("ge", campo.minimo), ("le", campo.maximo))
+        if valor is not None
+    }
+    tipo = int if campo.inteiro else float
+    return tipo, Field(description=campo.descricao, **limites)
 
 
 def montar_modelo_de_entrada() -> type[BaseModel]:
-    """Constrói o ``Cliente`` do Pydantic a partir do ``ChurnRawSchema``."""
-    contrato = ChurnRawSchema.to_schema()
-    campos = {
-        nome: _tipo_e_campo(coluna)
-        for nome, coluna in contrato.columns.items()
-        if nome not in FORA_DA_ENTRADA
-    }
-    # TotalCharges é texto no contrato do CSV cru (por causa dos brancos de
-    # cliente novo). Em JSON isso não se justifica: quem chama manda número, e o
-    # pipeline já sabe coagir. O limite inferior vem do contrato do dado limpo.
-    campos["TotalCharges"] = (
-        float,
-        Field(ge=0, description="Total acumulado; 0 para cliente no primeiro ciclo."),
+    """Constrói o ``Cliente`` do Pydantic a partir do contrato do dataset."""
+    return create_model(
+        "Cliente", **{campo.nome: _tipo_e_campo(campo) for campo in campos_de_entrada()}
     )
-    return create_model("Cliente", **campos)
 
 
 Cliente = montar_modelo_de_entrada()

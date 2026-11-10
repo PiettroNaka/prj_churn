@@ -48,3 +48,84 @@ services:
       - ./artifacts:/app/artifacts
       - ./mlruns:/app/mlruns
     command: uv run python -m churn.model
+
+  # O ajuste fino: 24 candidatos, e já treina o vencedor. Roda até o fim e sai.
+  tuning:
+    build: .
+    depends_on:
+      dados:
+        condition: service_completed_successfully
+    environment:
+      CHURN_MLFLOW_TRACKING_URI: sqlite:////app/mlruns/mlflow.db
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./mlruns:/app/mlruns
+    command: uv run python -m churn.tuning
+
+  # Registra o melhor run e move o alias @champion. Também roda até o fim e sai.
+  promover:
+    build: .
+    environment:
+      CHURN_MLFLOW_TRACKING_URI: sqlite:////app/mlruns/mlflow.db
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./mlruns:/app/mlruns
+    command: uv run python -m churn.registry
+
+  # A API: docker compose up api  ->  localhost:8000/docs
+  #
+  # Ela lê o MESMO /app/mlruns em que o treino escreveu. Isso não é detalhe de
+  # arrumação: o MLflow grava o caminho do artefato ABSOLUTO no banco, então um
+  # modelo treinado no host (em <repo>/mlruns) não resolve dentro do container,
+  # e vice-versa. Por isso a pilha treina no container — ver `tuning` acima.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./mlruns:/app/mlruns
+    healthcheck:
+      # Sem curl na imagem slim; o Python do venv resolve. Direto, e não por
+      # `uv run`: isto roda a cada 10s, e não há por que pagar a verificação do
+      # ambiente a cada batida só para abrir uma URL.
+      #
+      # "saudável" aqui é *com modelo carregado*, não "a porta respondeu". A
+      # diferença importa: o `app` espera por este healthcheck, e subir o front
+      # contra uma API sem campeão só adiantaria o erro para o usuário.
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - |
+          import json, sys, urllib.request
+          corpo = json.load(urllib.request.urlopen("http://localhost:8000/saude"))
+          sys.exit(0 if corpo.get("status") == "ok" else 1)
+      interval: 10s
+      timeout: 8s
+      retries: 10
+      start_period: 40s
+
+  # O front: docker compose up app  ->  localhost:8501
+  # Sobe a API junto, e só começa depois que ela responde com modelo carregado.
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+    environment:
+      CHURN_API_URL: http://api:8000
+    volumes:
+      - ./src:/app/src
+      - ./app:/app/app
+      # a v1 mostra o CSV; ele chega por volume, nunca pela imagem
+      - ./data:/app/data
