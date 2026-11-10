@@ -1,0 +1,29 @@
+# A imagem da API — o campeão do Registry atrás de HTTP.
+#
+# Mesma base e mesma regra de camadas do Dockerfile do treino: deps antes do
+# código, para que mudar um .py não reinstale o mundo. O que muda é o grupo
+# instalado (`api` em vez do padrão) e o que o container faz ao subir.
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+
+ENV UV_LINK_MODE=copy
+# A API não escreve run nenhum, mas lê o banco de tracking para resolver
+# models:/churn@champion. Tem de ser o MESMO banco onde o treino escreveu.
+ENV CHURN_MLFLOW_TRACKING_URI=sqlite:////app/mlruns/mlflow.db
+ENV MLFLOW_DISABLE_TELEMETRY=true
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+# --no-dev: pytest e httpx não têm o que fazer numa imagem que serve.
+RUN uv sync --frozen --no-install-project --no-dev --group api
+
+COPY README.md ./
+COPY src/ ./src/
+RUN uv sync --frozen --no-dev --group api
+
+EXPOSE 8000
+
+# Um worker só, de propósito: o modelo é carregado por processo, e quatro
+# workers seriam quatro cópias da floresta na memória para um serviço de curso.
+CMD ["uv", "run", "--frozen", "--no-dev", "--group", "api", \
+     "uvicorn", "churn.api:app", "--host", "0.0.0.0", "--port", "8000"]

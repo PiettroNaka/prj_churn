@@ -18,6 +18,13 @@ class Settings(BaseSettings):
         env_prefix="CHURN_",
         env_file=".env",
         protected_namespaces=(),
+        # Sem isto não há como dizer "None" por variável de ambiente, e metade
+        # dos campos opcionais fica inatingível de fora. `CHURN_MAX_DEPTH=`
+        # (vazio) não vira None: levanta ValidationError, porque "" não é int.
+        # Pior, `CHURN_MAX_FEATURES=` vira a string vazia e o sklearn treina
+        # outra coisa, calado. A palavra `null` dá um jeito de escrever o nulo:
+        # CHURN_MAX_DEPTH=null  CHURN_CLASS_WEIGHT=null
+        env_parse_none_str="null",
     )
 
     # dados
@@ -35,6 +42,25 @@ class Settings(BaseSettings):
     # do Encontro 7 — aqui o campo existe para que a configuração vencedora seja
     # ao menos dizível: CHURN_MAX_DEPTH=8.
     max_depth: int | None = None
+    # Os quatro abaixo não existiam enquanto a varredura era um grid de 3x3 em
+    # cima de n_estimators e max_depth. O ``churn.tuning`` busca nos seis, e um
+    # vencedor que a config não sabe dizer é um vencedor que não dá para treinar
+    # de novo — o oposto do que o projeto inteiro persegue.
+    min_samples_leaf: int = 1
+    min_samples_split: int = 2
+    #: "sqrt", "log2" ou None (todas as features em cada split).
+    max_features: str | None = "sqrt"
+    #: None ou "balanced". Com ~27% de churn, "balanced" compra recall pagando
+    #: em precisão; qual dos dois vale mais é decisão de negócio, não do modelo.
+    class_weight: str | None = None
+
+    # busca de hiperparâmetros (churn.tuning)
+    #
+    # 24 candidatos de 3.150: busca aleatória, não grid completo. O grid levaria
+    # horas para ganhar a terceira casa decimal. cv=4 porque 5 dobras custam 25%
+    # a mais para mover o resultado dentro do próprio desvio-padrão.
+    tuning_n_iter: int = 24
+    tuning_cv: int = 4
 
     # saída
     artifact_path: Path = Path("artifacts/churn_model.pkl")

@@ -103,6 +103,10 @@ Modelo treinado. Métricas no teste:
 Isso cria o `mlflow.db` e o primeiro run. Para as nove combinações do grid:
 `uv run python -m churn.experiments` (~1 minuto).
 
+Para o ajuste fino — 24 candidatos em seis eixos, com validação cruzada —
+`uv run python -m churn.tuning` (~2 minutos). Ele termina treinando o vencedor,
+então o run que sai já pode ser promovido com `uv run python -m churn.registry`.
+
 ## 5. Ver os modelos
 
 ```bash
@@ -151,6 +155,35 @@ curl.exe http://127.0.0.1:5000     # 200 = no ar;  refused = não subiu
 
 E tente `127.0.0.1:5000` no lugar de `localhost:5000`: alguns proxies corporativos
 tratam os dois de forma diferente.
+
+## 5c. A API e o front
+
+```bash
+uv run --group api uvicorn churn.api:app      # localhost:8000/docs
+uv run --group app streamlit run app/Inicio.py  # localhost:8501
+```
+
+Os dois precisam de um campeão promovido — `uv run python -m churn.tuning`
+seguido de `uv run python -m churn.registry`. Sem isso a API sobe e responde
+"sem modelo" em `/saude`, e o front mostra a mensagem em vez de calcular.
+
+Para conferir que a API está servindo de verdade:
+
+```bash
+uv run python scripts/conferir_api.py
+```
+
+Tudo junto, em container:
+
+```bash
+docker compose up dados tuning promover   # dado, busca, promoção
+docker compose up app                     # sobe a API e o front
+```
+
+> **Treinou no host e a API em Docker diz "sem modelo"?** É esperado. O MLflow
+> grava o caminho do artefato absoluto no banco, então um run criado em
+> `<repo>/mlruns` não resolve em `/app/mlruns`. Escolha um mundo: ou tudo local,
+> ou tudo em compose.
 
 ## 6. Rodar o modelo
 

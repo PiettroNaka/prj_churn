@@ -40,8 +40,13 @@ MAX_DEPTH = (None, 8, 16)
 METRICA = "roc_auc"
 
 
-def _dados(cfg: Settings):
-    """Prepara treino e teste uma vez só — o grid varia o modelo, não o dado."""
+def dados_codificados(cfg: Settings):
+    """Prepara treino e teste uma vez só — o grid varia o modelo, não o dado.
+
+    Público porque o ``churn.tuning`` parte exatamente do mesmo ponto: mesma
+    limpeza, mesmas features, mesmo split, mesma semente. Se cada varredura
+    montasse o seu, a comparação entre elas deixaria de significar alguma coisa.
+    """
     frame = add_derived_features(
         load_clean(cfg.data_path, cfg.id_column, cfg.target, cfg.quarantine_dir)
     )
@@ -59,7 +64,7 @@ def _dados(cfg: Settings):
 
 def run_grid(cfg: Settings = settings) -> None:
     """Treina o grid e registra um run por combinação."""
-    x_train, x_test, y_train, y_test = _dados(cfg)
+    x_train, x_test, y_train, y_test = dados_codificados(cfg)
 
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
     mlflow.set_experiment(cfg.mlflow_experiment)

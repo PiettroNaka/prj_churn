@@ -18,8 +18,22 @@ dependencies = [
 data = [
     "dvc>=3.55",
 ]
+# A API e o front são grupos à parte, não dependências do projeto, pela mesma
+# régua do `data`: a imagem de treino não precisa de servidor HTTP nem de
+# Streamlit, e carregar os dois dobraria o que o container baixa para treinar.
+# Cada Dockerfile instala só o seu grupo.
+api = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+app = [
+    "streamlit>=1.40",
+    "requests>=2.32",
+]
 dev = [
     "pytest>=8.0",
+    # TestClient do FastAPI: testa a API sem subir servidor nem abrir porta.
+    "httpx>=0.27",
 ]
 
 [build-system]

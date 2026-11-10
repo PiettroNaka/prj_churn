@@ -125,6 +125,57 @@ jobs:
             -v "$PWD/scripts:/app/scripts" \
             churn:0.1 uv run python scripts/prever.py --n 5
 
+      # A pilha de serviço, em Docker: promover o campeão, subir a API e
+      # conferir que ela responde pela rede. Os testes de unidade da API são
+      # pulados dentro da imagem de treino (ela não instala o grupo `api`, e é
+      # o ponto de ela ser enxuta) — quem cobre a API no container é isto, e é
+      # evidência melhor: prova que a imagem sobe, carrega o campeão e serve.
+      - name: Promove o campeão no Registry
+        run: docker compose run --rm promover
+
+      - name: Sobe a API e espera o healthcheck
+        run: |
+          docker compose up -d api
+          for _ in $(seq 1 40); do
+            estado=$(docker inspect --format '{{.State.Health.Status}}' \
+              "$(docker compose ps -q api)" 2>/dev/null || echo partindo)
+            echo "healthcheck: $estado"
+            [ "$estado" = healthy ] && exit 0
+            [ "$estado" = unhealthy ] && break
+            sleep 5
+          done
+          echo "--- a API não ficou saudável; log do container ---"
+          docker compose logs api
+          exit 1
+
+      # O cliente de teste sai do próprio contrato do dataset: se o schema
+      # ganhar uma coluna, esta chamada ganha junto.
+      - name: A API serve o modelo promovido
+        run: |
+          docker compose run --rm --no-deps \
+            -v "$PWD/scripts:/app/scripts" \
+            -e CHURN_API_URL=http://api:8000 \
+            app uv run --frozen --no-dev --group app \
+            python scripts/conferir_api.py
+
+      - name: O front constrói e carrega
+        run: |
+          docker compose build app
+          docker compose up -d app
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8501/_stcore/health >/dev/null 2>&1; then
+              echo "front no ar"; exit 0
+            fi
+            sleep 5
+          done
+          echo "--- o front não respondeu; log do container ---"
+          docker compose logs app
+          exit 1
+
+      - name: Derruba a pilha
+        if: always()
+        run: docker compose down -v
+
       - name: Publica o modelo treinado
         uses: actions/upload-artifact@v7
         with:

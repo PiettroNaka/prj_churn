@@ -17,10 +17,14 @@ prj_churn/
 │  ├─ features.py    # transformações puras + encoder sem vazamento
 │  ├─ model.py       # treino (entrypoint) — instrumentado com MLflow
 │  ├─ experiments.py # o grid rastreado
+│  ├─ tuning.py      # a busca aleatória em 6 eixos — o ajuste fino
 │  ├─ lineage.py     # data_md5() e git_commit() — a costura com o DVC
 │  ├─ serving.py     # ChurnPipeline — o modelo que aceita cliente cru
 │  ├─ registry.py    # promove o vencedor a @champion (Encontro 7)
+│  ├─ contrato.py    # o contrato traduzido: alimenta a API e o formulário
+│  ├─ api.py         # FastAPI — o campeão atrás de HTTP
 │  └─ evaluate.py    # métricas
+├─ app/              # Streamlit: Inicio.py (v1) + pages/ (v2)
 ├─ tests/            # pytest
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
 ├─ scripts/          # preparar · relatorio (sem navegador) · fetch_data · mlflow_ui · prever · profiling · gerar_v2 · alternar_versao · quebra_proposital · conferir_run
@@ -29,6 +33,9 @@ prj_churn/
 ├─ abrir-mlflow.bat  # Windows: duplo clique → a UI do MLflow
 ├─ atualizar.bat     # Windows: duplo clique → traz a versão nova, desenrosca o Git
 ├─ Dockerfile.dados  # a imagem que busca o dado (dvc pull no deploy)
+├─ Dockerfile.api    # a imagem da API
+├─ Dockerfile.app    # a imagem do front
+├─ compose.yml       # a pilha: dados · tuning · promover · api · app · mlflow
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
 ├─ mlflow.db         # tracking dos experimentos (gitignored)
 ├─ .dvc/             # config do DVC: remote e cache
@@ -45,6 +52,10 @@ uv sync                          # cria o ambiente a partir do pyproject/uv.lock
 ./scripts/fetch_data.sh          # traz data/churn.csv (o Git não o guarda mais)
 uv run python -m churn.model     # treina, imprime as métricas e registra o run
 uv run python -m churn.experiments  # o grid: 9 runs + o melhor
+uv run python -m churn.tuning       # a busca fina: 24 candidatos + treina o vencedor
+uv run python -m churn.registry  # promove o vencedor a @champion
+uv run --group api uvicorn churn.api:app          # a API em localhost:8000
+uv run --group app streamlit run app/Inicio.py    # o front em localhost:8501
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db   # localhost:5000
 uv run pytest                    # roda os testes
 ```
@@ -530,11 +541,85 @@ não aceita um cliente. O flavor sklearn continua lá dentro; o que muda é a
 fronteira do que foi empacotado.
 
 
+## Ajuste fino (`churn.tuning`)
+
+O grid varre nove pontos em dois eixos. A floresta tem mais botões, e os que
+ficaram de fora mexem no resultado tanto quanto a profundidade. A busca abre
+seis eixos e sorteia 24 das 3.150 combinações:
+
+```bash
+uv run python -m churn.tuning
+```
+
+Ela termina treinando o vencedor pelo caminho normal, então o que sai é um run
+promovível — não um relatório.
+
+### O que mudou no modelo
+
+Mesmo dado (v1), mesmo split, mesma semente. A diferença é só a configuração:
+
+| | padrão | ajustado | |
+|---|---|---|---|
+| roc_auc | 0.8053 | **0.8206** | +0.015 |
+| **recall** | 0.5602 | **0.7609** | **+0.20** |
+| f1 | 0.6000 | **0.6662** | +0.066 |
+| precision | 0.6459 | 0.5924 | −0.054 |
+| accuracy | 0.7570 | 0.7518 | −0.005 |
+
+A configuração vencedora: `n_estimators=200`, `max_depth=8`,
+`min_samples_leaf=16`, `min_samples_split=5`, `max_features=log2`,
+`class_weight=balanced`.
+
+O ganho que importa não é o `roc_auc`. É o **recall**: de 56% para 76% dos
+clientes que de fato cancelaram. Num problema de churn os dois erros não custam
+o mesmo — um falso positivo gasta um desconto, um falso negativo perde o
+cliente. Foi `class_weight=balanced` que comprou esses 20 pontos, pagando 5 de
+precisão. A acurácia caiu, e é por isso que ela não decide nada aqui: com 27% de
+churn na base, quem chuta "ninguém cancela" acerta 73%.
+
+### Três decisões que mudam o que o número significa
+
+**Busca aleatória, não exaustiva.** O grid completo das 3.150 combinações
+levaria horas para ganhar a terceira casa decimal. Sortear 24 pontos encontra
+quase sempre a mesma região, em minutos — o resultado de Bergstra & Bengio
+(2012), que vale justamente quando poucos hiperparâmetros dominam.
+
+**Validação cruzada no treino, teste intocado.** Escolher configuração olhando o
+teste é estudar com o gabarito. A busca pontua por CV dentro do treino; o teste
+aparece uma vez, no fim, para medir o vencedor. O `roc_auc` da CV e o do teste
+não batem — e não baterem é o esperado.
+
+**Mesmo split do resto do projeto.** A busca parte do mesmo
+`dados_codificados` que o grid, com a mesma semente. É o que torna os números
+das três varreduras comparáveis entre si.
+
+### Dizer o vencedor
+
+A busca imprime as variáveis que o reproduzem:
+
+```
+CHURN_N_ESTIMATORS=200   CHURN_MAX_DEPTH=8        CHURN_MAX_FEATURES=log2
+CHURN_MIN_SAMPLES_LEAF=16  CHURN_MIN_SAMPLES_SPLIT=5  CHURN_CLASS_WEIGHT=balanced
+```
+
+Repare no `null` quando um valor é nulo (`CHURN_MAX_DEPTH=null`). Vazio não
+serve: `CHURN_MAX_DEPTH=` levanta `ValidationError`, e `CHURN_MAX_FEATURES=`
+é pior — passa, vira a string vazia e treina **outro modelo**, calado. Quem
+resolve é `env_parse_none_str="null"` na `Settings`, e há teste amarrando as
+duas pontas.
+
 ## Model Registry (Encontro 7)
 
 A varredura acha o melhor run. Semanas depois, "qual era mesmo?" não se responde
 rolando uma lista — e um run é um experimento, não um artefato de produção. O
 Registry dá o endereço estável.
+
+```bash
+uv run python -m churn.tuning     # 1. busca, e já treina o vencedor (run promovível)
+uv run python -m churn.registry   # 2. registra e promove
+```
+
+Pelo grid, se preferir os nove pontos do Encontro 6, o passo do meio é manual:
 
 ```bash
 uv run python -m churn.experiments              # 1. acha a melhor configuração
@@ -590,6 +675,132 @@ name=churn not found` — com o modelo registrado. É o mesmo atrito de runs
 espalhados do Encontro 6, reaparecendo na hora de consumir. Há um teste de
 regressão travando a ordem das chamadas.
 
+
+## A API (`churn.api`)
+
+O Registry dá o endereço estável; a API dá a porta. Quem consome não instala o
+projeto, não conhece o MLflow e não sabe qual run venceu.
+
+```bash
+uv run --group api uvicorn churn.api:app --reload   # localhost:8000/docs
+```
+
+| rota | o que faz |
+|---|---|
+| `POST /prever` | um lote de clientes em JSON → rótulo e probabilidade, na ordem |
+| `GET /saude` | pronto para responder? é o que o healthcheck do compose pergunta |
+| `GET /modelo` | qual versão está servindo, e de qual run ela veio |
+| `GET /docs` | a documentação interativa, gerada do contrato |
+
+### O contrato de entrada não é escrito — é gerado
+
+Os campos que a API aceita saem do `ChurnRawSchema`, o mesmo contrato que valida
+o CSV no treino. Categoria vira `Literal` com os valores reais; faixa numérica
+vira `Field(ge=…, le=…)` com o piso e o teto do profiling.
+
+Uma lista paralela aqui seria *training/serving skew* na forma mais discreta: o
+dia em que o schema ganhasse uma categoria, a API continuaria recusando-a e
+ninguém ligaria os dois fatos. Há um teste que falha se os dois conjuntos
+divergirem. Efeito colateral melhor do que o esperado — o `/docs` sai com os
+domínios reais em cada campo, porque o OpenAPI vem da mesma fonte.
+
+### A assinatura que pedia a resposta de volta
+
+Na primeira chamada real, o modelo recusou:
+
+```
+Model is missing inputs ['customerID', 'Churn']
+```
+
+Para prever o churn era preciso **informar o churn**. A assinatura vinha de
+`infer_signature` sobre o CSV cru inteiro, e o MLflow trata assinatura como
+contrato: exige toda coluna declarada. O `ChurnPipeline` sempre descartou as
+duas colunas — só a assinatura não sabia. O defeito estava lá desde que o
+pipeline passou a ser logado, invisível porque o único teste de ponta a ponta
+mandava a linha completa, com `Churn` e tudo.
+
+Agora a assinatura sai de `entrada_de_servico(exemplo)`, e um teste lê a
+assinatura do modelo logado para garantir que o alvo nunca volte a ser exigido.
+
+## O front em Streamlit
+
+Duas páginas, duas versões.
+
+```bash
+uv run --group app streamlit run app/Inicio.py   # localhost:8501
+```
+
+**v1 — `app/Inicio.py`.** Título, código e dados. Não prevê nada, de propósito:
+um front que calcula antes de deixar ver o dado e o código vira uma caixa-preta
+bonita, e a caixa-preta é o que o curso passa doze encontros desmontando. O
+seletor mostra qualquer módulo de `src/churn/`; as abas mostram a tabela, o tipo
+de cada coluna e o resumo estatístico.
+
+**v2 — `app/pages/1_Prever_churn.py`.** Os parâmetros de um cliente e o churn
+calculado. O formulário é **gerado** do mesmo contrato: categoria vira
+`selectbox` com as opções reais, faixa vira `slider` com o piso e o teto. Não há
+como montar ali um cliente que a API recuse por domínio.
+
+O cálculo não acontece na página — ela chama a API. É o que separa o front do
+modelo: trocar de campeão é mover um alias, sem tocar numa linha do front.
+
+### `churn.contrato` — o contrato para quem não fala pandera
+
+A API e o formulário precisam da mesma informação (quais valores, qual faixa) e
+nenhum dos dois deveria aprender a ler `Check.statistics` por dentro. O
+`churn.contrato` traduz o schema em três perguntas — `permitidos`, `minimo`/
+`maximo`, `inteiro` — e é o que impede as duas telas de manterem cada uma a sua
+cópia da lista de categorias.
+
+Um detalhe que ele resolve: `TotalCharges` do formulário é **derivado** de
+`tenure × MonthlyCharges`. O contrato exige essa relação (10% de tolerância), e
+tomar o meio da faixa de cada campo isoladamente produzia um cliente de exemplo
+que violava a regra — quem abrisse a tela veria um aviso antes de digitar nada.
+
+## Tudo em Docker
+
+```bash
+docker compose up dados       # 1. o CSV chega por dvc pull
+docker compose up tuning      # 2. a busca, e o treino do vencedor
+docker compose up promover    # 3. registra e aponta @champion
+docker compose up app         # 4. sobe a API e o front juntos
+```
+
+| serviço | porta | o que é |
+|---|---|---|
+| `dados` | — | `dvc pull`; roda até o fim e sai |
+| `treino` / `tuning` | — | treino simples / busca + vencedor |
+| `promover` | — | registra o melhor run e move o alias |
+| `api` | 8000 | o campeão atrás de HTTP |
+| `app` | 8501 | as duas páginas do front |
+| `mlflow` | 5000 | a UI dos experimentos |
+
+O `app` declara `depends_on: api (service_healthy)`, e "saudável" aqui significa
+**com modelo carregado**, não "a porta respondeu" — subir o front contra uma API
+sem campeão só adiantaria o erro para quem está olhando.
+
+### A pegadinha do caminho absoluto
+
+O MLflow grava o caminho do artefato **absoluto** no banco. Um modelo treinado no
+host (em `<repo>/mlruns`) não resolve dentro do container, e vice-versa: a API
+subiria e diria "sem modelo" sem nenhuma pista do porquê. Por isso a pilha treina
+no container — `tuning` e `api` compartilham o mesmo `/app/mlruns`.
+
+Se você treinou no host e quer a API em Docker, escolha um mundo: ou tudo local
+(`uvicorn` direto), ou tudo em compose.
+
+### O que o CI prova
+
+Os testes de unidade da API rodam dentro da imagem de treino — curiosamente, sem
+que ela instale o grupo `api`: o próprio MLflow depende de `fastapi`, então ele
+já está lá. (O que faltava era o `httpx` do `TestClient`, e por isso ele entrou
+no grupo `dev`.) O `importorskip` nos testes é guarda para um ambiente sincronizado
+sem os grupos padrão, não para este.
+
+A cobertura que o teste de unidade **não** dá é a do container: `docker compose`
+sobe a API, espera o healthcheck e roda `scripts/conferir_api.py` contra o
+serviço pela rede. É o que prova que a imagem constrói, carrega o campeão e
+serve — três coisas que nenhum `TestClient` em processo verifica.
 
 ## O que mudou em relação ao `train_churn.py`
 
