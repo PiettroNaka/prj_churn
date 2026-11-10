@@ -57,6 +57,16 @@ uv run --group api uvicorn churn.api:app         # API  → localhost:8000/docs
 uv run --group app streamlit run app/Inicio.py   # front → localhost:8501
 ```
 
+Os quatro de uma vez, que é como se apresenta isto:
+
+```bash
+uv run --group api --group app python scripts/subir_front.py
+```
+
+Ele confere o dataset, promove um campeão se não houver, sobe a API em segundo
+plano, espera ela responder e só então abre o Streamlit — encerrando os dois
+juntos no fim. No Windows é o **`subir-front.bat`**, em duplo clique.
+
 Outros pontos de entrada:
 
 ```bash
@@ -72,8 +82,9 @@ uv run pytest                         # 122 testes
 Os testes **não precisam do dataset** — usam amostras de `tests/conftest.py`.
 Quem precisa dele é o treino.
 
-> **Windows:** o PowerShell não roda `.sh`. Há três arquivos de duplo clique na
-> raiz — `ver-runs.bat`, `abrir-mlflow.bat` e `atualizar.bat` — e o equivalente
+> **Windows:** o PowerShell não roda `.sh`. Há quatro arquivos de duplo clique na
+> raiz — `subir-front.bat`, `ver-runs.bat`, `abrir-mlflow.bat` e
+> `atualizar.bat` — e o equivalente
 > em Python puro para o resto: `uv run python scripts/preparar.py`. O passo a
 > passo completo está em [`docs/rodar-local.md`](docs/rodar-local.md).
 
@@ -650,7 +661,7 @@ prj_churn/
 │                    # conferir_run · conferir_api
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
 ├─ docs/             # rodar-local.md · data-pipeline.md
-├─ *.bat             # Windows: ver-runs · abrir-mlflow · atualizar
+├─ *.bat             # Windows: subir-front · ver-runs · abrir-mlflow · atualizar
 ├─ Dockerfile        # treino        Dockerfile.dados  # dvc pull no deploy
 ├─ Dockerfile.api    # a API         Dockerfile.app    # o front
 ├─ compose.yml       # dados · tuning · promover · api · app · mlflow
