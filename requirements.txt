@@ -29,4 +29,11 @@ requests==2.34.2
 
 # O projeto em si, a partir do pyproject.toml deste repositório. É o que põe
 # `src/churn` no ambiente e faz `from churn.config import settings` funcionar.
-.
+#
+# `-e` e não `.`: instalação editável aponta para `src/` em vez de copiar. A
+# cópia envelhece — o Streamlit Community Cloud atualiza o repositório a cada
+# push, mas só reinstala as dependências quando ESTE arquivo muda. Com uma cópia
+# congelada, `app/` fica novo e `churn` fica velho, e o app chama funções que
+# ela não tem. (Os arquivos em `app/` também montam o caminho sozinhos, para o
+# caso de a instalação editável não pegar na plataforma.)
+-e .

@@ -14,13 +14,22 @@ campeão é mover um alias, sem tocar numa linha daqui.
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
-import pandas as pd
-import requests
-import streamlit as st
+# O pacote vem de src/, não de uma cópia instalada — ver a nota no app/Inicio.py.
+# Uma página pode ser a primeira coisa que a plataforma carrega (basta abrir a
+# URL dela direto), então o caminho tem de ser montado aqui também.
+_SRC = Path(__file__).resolve().parents[2] / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-from churn.contrato import campos_de_entrada, cliente_exemplo, total_esperado
-from churn.schema import TOLERANCIA_TOTAL
+import pandas as pd  # noqa: E402
+import requests  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from churn.contrato import campos_de_entrada, cliente_exemplo, total_esperado  # noqa: E402
+from churn.schema import TOLERANCIA_TOTAL  # noqa: E402
 
 #: A porta em que a API sobe quando ela vive no mesmo container que o front.
 PORTA_LOCAL = 8000
@@ -192,10 +201,19 @@ def _api_embutida():
 
     `cache_resource` porque isto tem de acontecer uma vez por processo, não a
     cada clique — e o processo da API precisa sobreviver ao fim do script.
-    """
-    from churn.demonstracao import subir_api_embutida
 
-    return subir_api_embutida(porta=PORTA_LOCAL)
+    Engole qualquer falha de propósito. Esta é a tentativa *otimista*; quem
+    garante a tela é o modo demonstração logo abaixo. Deixar uma exceção subir
+    daqui derrubava a página inteira com um traceback vermelho — foi o que
+    aconteceu num deploy real, quando a cópia instalada do pacote estava velha
+    e não tinha esta função.
+    """
+    try:
+        from churn.demonstracao import subir_api_embutida
+
+        return subir_api_embutida(porta=PORTA_LOCAL)
+    except Exception:  # noqa: BLE001 — o modo demonstração assume daqui
+        return None
 
 
 saude = _saude_da_api()

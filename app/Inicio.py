@@ -10,15 +10,26 @@ A previsão é a v2, na página ao lado.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
-
-import pandas as pd
-import streamlit as st
-
-from churn.config import settings
 
 RAIZ = Path(__file__).resolve().parent.parent
 CODIGO = RAIZ / "src" / "churn"
+
+# O pacote vem de src/, não de uma cópia instalada em site-packages.
+#
+# Não é preciosismo: o Streamlit Community Cloud atualiza o repositório quando
+# você faz push, mas só reinstala as dependências se o requirements.txt mudar.
+# Com uma instalação não-editável, `app/` fica novo e `churn` fica velho — e o
+# app chama funções que a cópia não tem, com um ImportError que não diz isso.
+# O repositório é a fonte; a cópia é um artefato do deploy.
+if str(CODIGO.parent) not in sys.path:
+    sys.path.insert(0, str(CODIGO.parent))
+
+import pandas as pd  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from churn.config import settings  # noqa: E402
 
 st.set_page_config(
     page_title="Churn — projeto fio-condutor",
