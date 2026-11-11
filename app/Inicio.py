@@ -76,10 +76,6 @@ def carregar_dados(caminho: str) -> pd.DataFrame:
 # --------------------------------------------------------------------------
 
 st.title("📉 Previsão de churn")
-st.caption(
-    "Projeto fio-condutor do curso de MLOps — do script monolítico ao modelo "
-    "servido, versionado e rastreável."
-)
 
 st.markdown(
     """
