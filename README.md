@@ -9,6 +9,10 @@ container.
 O que o projeto responde, no fim: *dado um cliente, qual a probabilidade de ele
 cancelar — e de qual dado e de qual código essa resposta saiu?*
 
+**No ar:** [prjchurn.streamlit.app](https://prjchurn.streamlit.app) — a pilha
+completa, não só o front. A barra lateral mostra `API · modelo v1`: cada
+previsão é uma chamada HTTP ao campeão promovido no MLflow Model Registry.
+
 ---
 
 ## Sumário
@@ -111,6 +115,9 @@ com modelo carregado**, não "a porta respondeu". Subir o front contra uma API s
 campeão só adiantaria o erro para quem está olhando.
 
 ### Publicar de graça, com a API junto
+
+Publicado em **[prjchurn.streamlit.app](https://prjchurn.streamlit.app)**, com
+esta configuração:
 
 | campo | valor |
 |---|---|
