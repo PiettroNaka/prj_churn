@@ -1,0 +1,20 @@
+# Tema do front. Fica no repositório, e não nas configurações da plataforma,
+# porque a aparência de um entregável não deveria depender de quem fez o deploy.
+#
+# base = "dark" fixa o tema em vez de seguir o navegador de quem abre. Numa
+# apresentação isso importa: a tela tem de sair igual no projetor da sala e no
+# notebook de quem preparou.
+[theme]
+base = "dark"
+
+# Verde-azulado médio, escolhido por contraste medido e não por gosto: 4,75:1
+# sobre o fundo escuro e 3,98:1 sobre o claro. É a mesma cor dos gráficos, então
+# botão, seleção e barra falam a mesma língua.
+primaryColor = "#148f82"
+
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#19202a"
+textColor = "#e6ecea"
+
+[browser]
+gatherUsageStats = false

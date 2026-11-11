@@ -65,8 +65,9 @@ ADD_ONS_INTERNET = SIM_NAO + [SEM_INTERNET]
 #: segue e alguém decide se o schema tem de crescer.
 #:
 #: O corte não é de gosto, é de consequência. ``Contract`` também é catálogo, mas
-#: é a feature nº 1 do modelo (importância 0,175 contra 0,047 do PaymentMethod e
-#: 0,026 do InternetService): um valor novo ali muda o que o modelo significa, e
+#: é a feature nº 1 do modelo (importância 0,464 no campeão, contra 0,022 do
+#: PaymentMethod e 0,064 do InternetService): um valor novo ali muda o que o
+#: modelo significa, e
 #: seguir treinando seria pior que parar. ``Churn`` é o alvo, e as demais são
 #: binários ou valores derivados — um terceiro valor lá é corrupção, não
 #: lançamento. Todas essas continuam sendo erro fatal.
@@ -133,24 +134,78 @@ class _ChurnBase(pa.DataFrameModel):
     """
 
     # ---- categóricas: o domínio fechado de cada coluna ----
-    gender: Series[str] = pa.Field(isin=["Female", "Male"])
-    SeniorCitizen: Series[int] = pa.Field(isin=[0, 1])
-    Partner: Series[str] = pa.Field(isin=SIM_NAO)
-    Dependents: Series[str] = pa.Field(isin=SIM_NAO)
-    PhoneService: Series[str] = pa.Field(isin=SIM_NAO)
-    MultipleLines: Series[str] = pa.Field(isin=SIM_NAO + [SEM_TELEFONE])
+    #
+    # As descrições não são comentário: elas atravessam o projeto. O
+    # ``churn.contrato`` as lê, a API as publica no /docs e o formulário do
+    # Streamlit as mostra sob cada campo. Escrever a explicação aqui é o que
+    # impede três versões dela envelhecendo em ritmos diferentes.
+    #
+    # As taxas citadas foram medidas na v1 do dataset, cuja média é 33%. Elas
+    # dizem o que o dado mostra, não o que o modelo decide: a importância de
+    # cada feature é outra conta, e está no README.
+    gender: Series[str] = pa.Field(
+        isin=["Female", "Male"],
+        description="Gênero do titular. Mal separa churn: 33% contra 32%.",
+    )
+    SeniorCitizen: Series[int] = pa.Field(
+        isin=[0, 1],
+        description="1 para 65 anos ou mais. Esse grupo cancela 39%, contra 31%.",
+    )
+    Partner: Series[str] = pa.Field(
+        isin=SIM_NAO,
+        description="Tem cônjuge no cadastro. Quem não tem cancela 34%, contra 31%.",
+    )
+    Dependents: Series[str] = pa.Field(
+        isin=SIM_NAO,
+        description="Tem dependentes no cadastro. Quase não separa: 33% contra 32%.",
+    )
+    PhoneService: Series[str] = pa.Field(
+        isin=SIM_NAO,
+        description="Assina linha telefônica. Quase não separa: 33% contra 31%.",
+    )
+    MultipleLines: Series[str] = pa.Field(
+        isin=SIM_NAO + [SEM_TELEFONE],
+        description="Mais de uma linha. Diz 'No phone service' para quem não tem telefonia.",
+    )
     # alerta, não erro: ver CATEGORIAS_DE_CATALOGO
     InternetService: Series[str] = pa.Field(
-        isin=["DSL", "Fiber optic", "No"], raise_warning=True
+        isin=["DSL", "Fiber optic", "No"],
+        raise_warning=True,
+        description="Tipo de conexão. Fibra cancela 45%, DSL 27%, sem internet 16%.",
     )
-    OnlineSecurity: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
-    OnlineBackup: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
-    DeviceProtection: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
-    TechSupport: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
-    StreamingTV: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
-    StreamingMovies: Series[str] = pa.Field(isin=ADD_ONS_INTERNET)
-    Contract: Series[str] = pa.Field(isin=["Month-to-month", "One year", "Two year"])
-    PaperlessBilling: Series[str] = pa.Field(isin=SIM_NAO)
+    OnlineSecurity: Series[str] = pa.Field(
+        isin=ADD_ONS_INTERNET,
+        description="Proteção online contratada. Sem ela cancela 39%, com ela 36%.",
+    )
+    OnlineBackup: Series[str] = pa.Field(
+        isin=ADD_ONS_INTERNET,
+        description="Backup em nuvem contratado.",
+    )
+    DeviceProtection: Series[str] = pa.Field(
+        isin=ADD_ONS_INTERNET,
+        description="Seguro do equipamento contratado.",
+    )
+    TechSupport: Series[str] = pa.Field(
+        isin=ADD_ONS_INTERNET,
+        description="Suporte técnico contratado. Sem ele cancela 40%, com ele 35%.",
+    )
+    StreamingTV: Series[str] = pa.Field(
+        isin=ADD_ONS_INTERNET,
+        description="Pacote de TV por streaming.",
+    )
+    StreamingMovies: Series[str] = pa.Field(
+        isin=ADD_ONS_INTERNET,
+        description="Pacote de filmes por streaming.",
+    )
+    Contract: Series[str] = pa.Field(
+        isin=["Month-to-month", "One year", "Two year"],
+        description="Fidelidade do plano, e o campo que mais pesa no modelo: "
+        "mensal cancela 50%, anual 14%, bienal 7%.",
+    )
+    PaperlessBilling: Series[str] = pa.Field(
+        isin=SIM_NAO,
+        description="Fatura só digital. Cancela 34%, contra 30% de quem recebe impressa.",
+    )
     # alerta, não erro: ver CATEGORIAS_DE_CATALOGO
     PaymentMethod: Series[str] = pa.Field(
         isin=[
@@ -160,16 +215,22 @@ class _ChurnBase(pa.DataFrameModel):
             "Credit card (automatic)",
         ],
         raise_warning=True,
+        description="Forma de pagamento. Cheque eletrônico cancela 40%; "
+        "as outras três ficam perto de 29%.",
     )
 
     # ---- numéricas: faixa ----
     tenure: Series[int] = pa.Field(
-        ge=0, le=TENURE_MAX, description=f"Meses de contrato, 0 a {TENURE_MAX}."
+        ge=0,
+        le=TENURE_MAX,
+        description=f"Meses desde a adesão, de 0 a {TENURE_MAX}. Quem acabou de "
+        "chegar cancela muito mais do que quem já ficou.",
     )
     MonthlyCharges: Series[float] = pa.Field(
         ge=MONTHLY_MIN,
         le=MONTHLY_MAX,
-        description=f"Mensalidade corrente, de {MONTHLY_MIN:.0f} a {MONTHLY_MAX:.0f}.",
+        description=f"Mensalidade atual, de R$ {MONTHLY_MIN:.0f} a R$ {MONTHLY_MAX:.0f}. "
+        "Planos caros concentram mais cancelamentos.",
     )
 
     # ---- alvo: nunca nulo, ou o rótulo do treino é inventado ----
