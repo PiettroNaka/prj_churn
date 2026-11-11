@@ -158,35 +158,73 @@ def _widget(campo, valor_atual):
 #: reais do dataset, são as combinações que o dado mostra como extremas.
 PERFIS: dict[str, dict] = {
     "Risco alto": {
-        "Contract": "Month-to-month",
+        "SeniorCitizen": 1,
+        "Partner": "No",
+        "Dependents": "No",
+        "PhoneService": "Yes",
+        "MultipleLines": "Yes",
         "InternetService": "Fiber optic",
-        "PaymentMethod": "Electronic check",
-        "TechSupport": "No",
         "OnlineSecurity": "No",
+        "OnlineBackup": "No",
+        "DeviceProtection": "No",
+        "TechSupport": "No",
+        "StreamingTV": "Yes",
+        "StreamingMovies": "Yes",
+        "Contract": "Month-to-month",
         "PaperlessBilling": "Yes",
+        "PaymentMethod": "Electronic check",
         "tenure": 2,
         "MonthlyCharges": 95.0,
     },
     "Risco médio": {
-        "Contract": "One year",
+        "SeniorCitizen": 0,
+        "Partner": "No",
+        "Dependents": "No",
+        "PhoneService": "Yes",
+        "MultipleLines": "No",
         "InternetService": "DSL",
-        "PaymentMethod": "Mailed check",
-        "TechSupport": "No",
         "OnlineSecurity": "Yes",
+        "OnlineBackup": "No",
+        "DeviceProtection": "No",
+        "TechSupport": "No",
+        "StreamingTV": "Yes",
+        "StreamingMovies": "No",
+        "Contract": "One year",
         "PaperlessBilling": "Yes",
+        "PaymentMethod": "Mailed check",
         "tenure": 24,
         "MonthlyCharges": 60.0,
     },
     "Risco baixo": {
-        "Contract": "Two year",
+        "SeniorCitizen": 0,
+        "Partner": "Yes",
+        "Dependents": "Yes",
+        "PhoneService": "Yes",
+        "MultipleLines": "No",
         "InternetService": "DSL",
-        "PaymentMethod": "Bank transfer (automatic)",
-        "TechSupport": "Yes",
         "OnlineSecurity": "Yes",
+        "OnlineBackup": "Yes",
+        "DeviceProtection": "Yes",
+        "TechSupport": "Yes",
+        "StreamingTV": "No",
+        "StreamingMovies": "No",
+        "Contract": "Two year",
         "PaperlessBilling": "No",
+        "PaymentMethod": "Bank transfer (automatic)",
         "tenure": 64,
         "MonthlyCharges": 45.0,
     },
+}
+
+#: O que explica o risco de cada perfil, para a tela dizer por que mudou. Sai
+#: das taxas medidas na v1, não de intuição.
+PORQUE: dict[str, str] = {
+    "Risco alto": "contrato mensal (50% cancelam), fibra (45%), cheque "
+    "eletrônico (40%), sem suporte (40%) e só 2 meses de casa",
+    "Risco médio": "contrato anual (14%), DSL (27%), sem suporte técnico e "
+    "2 anos de casa",
+    "Risco baixo": "contrato bienal (7%), débito automático, todos os add-ons "
+    "contratados e 64 meses de casa",
 }
 
 
@@ -199,8 +237,9 @@ campos = {campo.nome: campo for campo in campos_de_entrada()}
 # Os widgets leem daqui, então trocar o perfil troca o formulário. Guardar no
 # session_state e não numa variável é o que faz o valor sobreviver ao rerun que
 # o próprio clique dispara.
-def aplicar(ajustes: dict) -> None:
+def aplicar(ajustes: dict, nome: str = "") -> None:
     """Move os controles para um cliente inteiro, e recarrega a página."""
+    st.session_state.perfil = nome
     novo = {**cliente_exemplo(), **ajustes}
     # o total acompanha os outros dois, ou o cliente nasce violando o contrato
     novo["TotalCharges"] = total_esperado(novo["tenure"], novo["MonthlyCharges"])
@@ -254,11 +293,26 @@ st.caption("Comece de um cliente pronto, ou monte o seu campo a campo:")
 botoes = st.columns(len(PERFIS) + 1)
 for coluna, (nome_perfil, ajustes) in zip(botoes, PERFIS.items()):
     with coluna:
-        if st.button(nome_perfil, use_container_width=True):
-            aplicar(ajustes)
+        ativo = st.session_state.get("perfil") == nome_perfil
+        if st.button(
+            nome_perfil,
+            use_container_width=True,
+            type="primary" if ativo else "secondary",
+        ):
+            aplicar(ajustes, nome_perfil)
 with botoes[-1]:
     if st.button("Padrão", use_container_width=True):
         aplicar({})
+
+# Os perfis mexem no cliente inteiro, e boa parte da mudança acontece abaixo da
+# dobra. Sem esta linha, quem clica olha o topo da tela, não vê nada se mexer e
+# conclui que o botão não funcionou.
+if st.session_state.get("perfil"):
+    st.success(
+        f"**{st.session_state.perfil}** aplicado — "
+        f"{PORQUE[st.session_state.perfil]}. "
+        "Os campos abaixo mudaram; role para ver."
+    )
 
 exemplo = cliente_exemplo()
 cliente: dict = {}
