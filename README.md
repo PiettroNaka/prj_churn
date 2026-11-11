@@ -333,7 +333,7 @@ corte é por consequência:
 | Coluna | Valor novo significa | Severidade |
 |---|---|---|
 | `InternetService`, `PaymentMethod` | o negócio lançou algo (5G, Pix) | **alerta** — passa e registra |
-| `Contract` | mudou a feature nº 1 (importância 0,175) | **erro** |
+| `Contract` | mudou a feature nº 1 (importância 0,464 no campeão) | **erro** |
 | `Churn` | o alvo virou outra coisa | **erro** |
 | binários e add-ons | um terceiro valor onde só existem dois | **erro** — é corrupção |
 

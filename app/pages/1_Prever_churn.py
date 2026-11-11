@@ -24,12 +24,18 @@ _SRC = Path(__file__).resolve().parents[2] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+import altair as alt  # noqa: E402
 import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from churn.contrato import campos_de_entrada, cliente_exemplo, total_esperado  # noqa: E402
 from churn.schema import TOLERANCIA_TOTAL  # noqa: E402
+
+#: A cor dos gráficos. Escolhida por contraste medido, não por gosto: 4,75:1
+#: sobre o fundo escuro e 3,98:1 sobre o claro, então a mesma cor serve nos dois
+#: temas. É a mesma do `primaryColor` em .streamlit/config.toml.
+ACENTO = "#148f82"
 
 #: A porta em que a API sobe quando ela vive no mesmo container que o front.
 PORTA_LOCAL = 8000
@@ -85,40 +91,179 @@ st.caption(
 )
 
 
+def pct(valor: float, casas: int = 1) -> str:
+    """Percentual no padrão brasileiro — vírgula decimal, não ponto.
+
+    O resto da tela está em português; `84.6%` no meio dela é um descuido que
+    aparece justamente no número que todo mundo olha.
+    """
+    return f"{valor * 100:.{casas}f}".replace(".", ",") + "%"
+
+
+def _chave(nome: str) -> str:
+    """A chave do widget no ``session_state``.
+
+    Sem chave, o Streamlit guarda o valor pela posição e ignora um `value=` novo
+    no rerun — trocar o perfil não mexeria em nada na tela. Com ela, escrever em
+    ``st.session_state[chave]`` é o que de fato move o controle.
+    """
+    return f"campo_{nome}"
+
+
 def _widget(campo, valor_atual):
-    """Um campo do contrato vira o controle que corresponde ao seu domínio."""
+    """Um campo do contrato vira o controle que corresponde ao seu domínio.
+
+    A descrição aparece **sob** o campo, não só no ícone de ajuda: num
+    formulário de 19 campos em vocabulário de telecom, uma explicação que exige
+    passar o mouse é uma explicação que ninguém lê — e menos ainda quem está
+    assistindo a uma apresentação projetada.
+    """
     rotulo = ROTULOS.get(campo.nome, campo.nome)
+    chave = _chave(campo.nome)
 
     if campo.e_categoria:
         opcoes = list(campo.permitidos)
         indice = opcoes.index(valor_atual) if valor_atual in opcoes else 0
         if campo.nome == "SeniorCitizen":
-            return st.selectbox(
-                rotulo, opcoes, index=indice, format_func=lambda v: "Sim" if v else "Não"
+            valor = st.selectbox(
+                rotulo,
+                opcoes,
+                index=indice,
+                key=chave,
+                format_func=lambda v: "Sim" if v else "Não",
             )
-        return st.selectbox(rotulo, opcoes, index=indice, help=campo.descricao or None)
-
-    if campo.inteiro:
-        return st.slider(
-            rotulo,
-            int(campo.minimo),
-            int(campo.maximo),
-            int(valor_atual),
-            help=campo.descricao or None,
+        else:
+            valor = st.selectbox(rotulo, opcoes, index=indice, key=chave)
+    elif campo.inteiro:
+        valor = st.slider(
+            rotulo, int(campo.minimo), int(campo.maximo), int(valor_atual), key=chave
         )
-    return st.number_input(
-        rotulo,
-        min_value=float(campo.minimo),
-        max_value=float(campo.maximo),
-        value=float(valor_atual),
-        step=1.0,
-        help=campo.descricao or None,
-    )
+    else:
+        valor = st.number_input(
+            rotulo,
+            min_value=float(campo.minimo),
+            max_value=float(campo.maximo),
+            value=float(valor_atual),
+            step=1.0,
+            key=chave,
+        )
+
+    if campo.descricao:
+        st.caption(campo.descricao)
+    return valor
+
+
+#: Clientes prontos, para a demonstração não depender de acertar 19 campos ao
+#: vivo. Os valores saem dos padrões de churn medidos na v1 — não são clientes
+#: reais do dataset, são as combinações que o dado mostra como extremas.
+PERFIS: dict[str, dict] = {
+    "Risco alto": {
+        "Contract": "Month-to-month",
+        "InternetService": "Fiber optic",
+        "PaymentMethod": "Electronic check",
+        "TechSupport": "No",
+        "OnlineSecurity": "No",
+        "PaperlessBilling": "Yes",
+        "tenure": 2,
+        "MonthlyCharges": 95.0,
+    },
+    "Risco médio": {
+        "Contract": "One year",
+        "InternetService": "DSL",
+        "PaymentMethod": "Mailed check",
+        "TechSupport": "No",
+        "OnlineSecurity": "Yes",
+        "PaperlessBilling": "Yes",
+        "tenure": 24,
+        "MonthlyCharges": 60.0,
+    },
+    "Risco baixo": {
+        "Contract": "Two year",
+        "InternetService": "DSL",
+        "PaymentMethod": "Bank transfer (automatic)",
+        "TechSupport": "Yes",
+        "OnlineSecurity": "Yes",
+        "PaperlessBilling": "No",
+        "tenure": 64,
+        "MonthlyCharges": 45.0,
+    },
+}
 
 
 campos = {campo.nome: campo for campo in campos_de_entrada()}
+
+# --------------------------------------------------------------------------
+# perfis prontos
+# --------------------------------------------------------------------------
+
+# Os widgets leem daqui, então trocar o perfil troca o formulário. Guardar no
+# session_state e não numa variável é o que faz o valor sobreviver ao rerun que
+# o próprio clique dispara.
+def aplicar(ajustes: dict) -> None:
+    """Move os controles para um cliente inteiro, e recarrega a página."""
+    novo = {**cliente_exemplo(), **ajustes}
+    # o total acompanha os outros dois, ou o cliente nasce violando o contrato
+    novo["TotalCharges"] = total_esperado(novo["tenure"], novo["MonthlyCharges"])
+    for nome, valor in novo.items():
+        st.session_state[_chave(nome)] = valor
+    st.rerun()
+
+
+@st.cache_data(show_spinner=False)
+def _curva_por_tenure(cliente: dict) -> pd.DataFrame | None:
+    """A probabilidade do mesmo cliente ao longo dos 72 meses possíveis.
+
+    Um lote só, não 37 requisições: a API aceita vários clientes por chamada, e
+    é para isso que ela foi feita. `cache_data` porque a curva é função pura do
+    cliente — mexer no corte não precisa recalcular nada.
+
+    `TotalCharges` acompanha o tenure, senão a curva passearia por clientes que
+    o contrato do dataset reprovaria.
+
+    Funciona nos dois modos, como o resto da página: tenta a API e, sem ela,
+    usa o pipeline local. Uma curva vazia no modo demonstração seria uma
+    ausência sem explicação.
+    """
+    meses = list(range(0, 73, 2))
+    lote = []
+    for m in meses:
+        linha = dict(cliente)
+        linha["tenure"] = m
+        linha["TotalCharges"] = total_esperado(m, linha["MonthlyCharges"])
+        lote.append(linha)
+
+    try:
+        resposta = requests.post(f"{API}/prever", json=lote, timeout=60)
+        if resposta.status_code == 200:
+            valores = [p["probabilidade"] for p in resposta.json()]
+            return pd.DataFrame({"tenure": meses, "probabilidade": valores})
+    except requests.RequestException:
+        pass
+
+    try:
+        pipeline, _ = _pipeline_local()
+        saida = pipeline.predict(None, pd.DataFrame(lote))
+        return pd.DataFrame(
+            {"tenure": meses, "probabilidade": saida["probabilidade"].tolist()}
+        )
+    except Exception:  # noqa: BLE001 — sem curva a página segue sem ela
+        return None
+
+
+st.caption("Comece de um cliente pronto, ou monte o seu campo a campo:")
+botoes = st.columns(len(PERFIS) + 1)
+for coluna, (nome_perfil, ajustes) in zip(botoes, PERFIS.items()):
+    with coluna:
+        if st.button(nome_perfil, use_container_width=True):
+            aplicar(ajustes)
+with botoes[-1]:
+    if st.button("Padrão", use_container_width=True):
+        aplicar({})
+
 exemplo = cliente_exemplo()
 cliente: dict = {}
+
+st.divider()
 
 # --------------------------------------------------------------------------
 # o formulário
@@ -126,10 +271,16 @@ cliente: dict = {}
 
 for titulo, nomes in SECOES.items():
     st.subheader(titulo)
-    colunas = st.columns(min(4, len(nomes)))
-    for posicao, nome in enumerate(nomes):
-        with colunas[posicao % len(colunas)]:
-            cliente[nome] = _widget(campos[nome], exemplo[nome])
+    # Uma `st.columns` NOVA por linha, em vez de distribuir os campos em
+    # rodízio por colunas fixas. Colunas são pilhas verticais: com legendas de
+    # alturas diferentes sob cada campo, o rodízio faz os controles perderem o
+    # alinhamento entre linhas — um campo sobe e fica órfão no topo da seguinte.
+    por_linha = min(4, len(nomes))
+    for inicio in range(0, len(nomes), por_linha):
+        faixa = nomes[inicio : inicio + por_linha]
+        for coluna, nome in zip(st.columns(por_linha), faixa):
+            with coluna:
+                cliente[nome] = _widget(campos[nome], exemplo[nome])
 
 st.subheader("Valores")
 tempo, mensal, total = st.columns(3)
@@ -289,24 +440,114 @@ if st.button("Calcular churn", type="primary", use_container_width=True):
         )
 
     probabilidade = float(previsao["probabilidade"])
+    st.session_state.ultima = {"cliente": dict(cliente), "p": probabilidade}
 
-    rotulo, risco = st.columns([1, 2])
-    with rotulo:
-        if previsao["churn"] == "Yes":
+# --------------------------------------------------------------------------
+# o resultado
+# --------------------------------------------------------------------------
+
+if "ultima" in st.session_state:
+    probabilidade = st.session_state.ultima["p"]
+
+    st.subheader("Resultado")
+
+    # O corte é controle, não constante. A ressalva central do projeto é que o
+    # ganho do ajuste fino foi de ponto de operação, não de capacidade
+    # preditiva — e esse argumento se demonstra movendo este slider, não
+    # explicando. Com o corte em 0,34 o modelo antigo alcança o recall do novo.
+    corte = st.slider(
+        "Corte de decisão",
+        0.05, 0.95, 0.50, 0.01,
+        help="Acima deste valor, o cliente é tratado como quem vai cancelar.",
+    )
+    vai_cancelar = probabilidade >= corte
+
+    marca, medida = st.columns([1, 2])
+    with marca:
+        if vai_cancelar:
             st.error("### Vai cancelar")
         else:
             st.success("### Deve ficar")
-        st.metric("Probabilidade de churn", f"{probabilidade:.1%}")
-    with risco:
+    with medida:
+        st.metric("Probabilidade de churn", pct(probabilidade))
         st.progress(min(probabilidade, 1.0))
+        distancia = probabilidade - corte
         st.caption(
-            "A probabilidade é o que vale para decidir, não o rótulo: o corte em "
-            "50% é convenção. Para uma campanha de retenção com orçamento "
-            "limitado, ordene a carteira por esta coluna e vá descendo."
+            f"{pct(abs(distancia))} {'acima' if distancia >= 0 else 'abaixo'} do "
+            f"corte de {pct(corte, 0)}. Mova o corte e veja o rótulo virar sem o "
+            "modelo mudar — é por isso que a probabilidade é o que vale para "
+            "decidir, não o rótulo."
         )
 
-    with st.expander("O que foi enviado"):
+    # --- como o risco muda ao longo do tempo de casa ---
+    st.subheader("Se este cliente ficasse mais tempo")
+    st.caption(
+        "A mesma linha de cliente, variando só os meses de contrato. "
+        "O resto permanece como está no formulário."
+    )
+
+    curva = _curva_por_tenure(st.session_state.ultima["cliente"])
+    if curva is None:
+        st.info("A curva precisa do modelo carregado; recarregue a página.")
+    else:
+        # Grade discreta e poucos rótulos: a curva tem 37 pontos, e uma linha
+        # de grade por ponto seria mais tinta na estrutura do que no dado.
+        base = alt.Chart(curva).encode(
+            x=alt.X(
+                "tenure:Q",
+                title="meses de contrato",
+                scale=alt.Scale(domain=[0, 72], nice=False),
+                axis=alt.Axis(values=[0, 12, 24, 36, 48, 60, 72], grid=False),
+            ),
+            y=alt.Y(
+                "probabilidade:Q",
+                title="probabilidade de churn",
+                scale=alt.Scale(domain=[0, 1]),
+                axis=alt.Axis(format="%", tickCount=5, gridColor="#2b363c"),
+            ),
+        )
+        linha = base.mark_line(color=ACENTO, strokeWidth=2)
+        # alvo de hover maior que a marca, e invisível: quem passa o mouse quer
+        # o valor, não mais um ponto desenhado em cima da linha
+        pontos = base.mark_point(size=160, opacity=0).encode(
+            tooltip=[
+                alt.Tooltip("tenure:Q", title="meses"),
+                alt.Tooltip("probabilidade:Q", title="churn", format=".1%"),
+            ]
+        )
+        regua = (
+            alt.Chart(pd.DataFrame({"y": [corte]}))
+            .mark_rule(strokeDash=[4, 4], color="#8b9a97")
+            .encode(y="y:Q")
+        )
+        aqui = (
+            alt.Chart(pd.DataFrame({
+                "tenure": [st.session_state.ultima["cliente"]["tenure"]],
+                "probabilidade": [probabilidade],
+            }))
+            .mark_point(color=ACENTO, size=120, filled=True)
+            .encode(x="tenure:Q", y="probabilidade:Q")
+        )
+        st.altair_chart(
+            (linha + pontos + regua + aqui).properties(height=280),
+            use_container_width=True,
+        )
+        inicio = float(curva["probabilidade"].iloc[0])
+        fim = float(curva["probabilidade"].iloc[-1])
+        st.caption(
+            f"O ponto cheio é o cliente do formulário; a linha tracejada é o "
+            f"corte de {pct(corte, 0)}. De 0 a 72 meses o risco vai de "
+            f"{pct(inicio, 0)} a {pct(fim, 0)} — "
+            # pontos percentuais: a diferença de duas frações, em pontos
+            f"**{abs(inicio - fim) * 100:.0f} pontos**. "
+            "Se a queda for pequena, é sinal de que outro campo (quase sempre o "
+            "tipo de contrato) está dominando a decisão."
+        )
+
+    with st.expander("O que foi enviado à API"):
         st.dataframe(
-            pd.DataFrame([cliente]).T.rename(columns={0: "valor"}),
+            pd.DataFrame([st.session_state.ultima["cliente"]]).T.rename(
+                columns={0: "valor"}
+            ),
             use_container_width=True,
         )

@@ -26,6 +26,7 @@ CODIGO = RAIZ / "src" / "churn"
 if str(CODIGO.parent) not in sys.path:
     sys.path.insert(0, str(CODIGO.parent))
 
+import altair as alt  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
@@ -36,6 +37,32 @@ st.set_page_config(
     page_icon="📉",
     layout="wide",
 )
+
+
+#: A cor dos gráficos, a mesma do tema. Contraste medido: 4,75:1 sobre o fundo
+#: escuro e 3,98:1 sobre o claro.
+ACENTO = "#148f82"
+
+
+def _barras(dados: pd.DataFrame, eixo: str, valor: str, titulo_x: str, formato: str):
+    """Barras horizontais de série única.
+
+    Uma cor só, de propósito: o comprimento da barra já codifica a magnitude, e
+    pintar cada barra de um tom diferente acrescentaria uma segunda codificação
+    da mesma informação — ruído com aparência de dado.
+    """
+    base = alt.Chart(dados).encode(
+        y=alt.Y(f"{eixo}:N", sort="-x", title=None),
+        x=alt.X(f"{valor}:Q", title=titulo_x, axis=alt.Axis(format=formato)),
+        tooltip=[
+            alt.Tooltip(f"{eixo}:N", title=" "),
+            alt.Tooltip(f"{valor}:Q", title=titulo_x, format=formato),
+        ],
+    )
+    return (
+        base.mark_bar(color=ACENTO, cornerRadiusEnd=4, height=18)
+        .properties(height=alt.Step(26))
+    )
 
 
 @st.cache_data
@@ -102,7 +129,10 @@ else:
     )
     fonte = escolhido.read_text(encoding="utf-8")
     st.caption(f"`src/churn/{escolhido.name}` · {len(fonte.splitlines())} linhas")
-    st.code(fonte, language="python", line_numbers=True)
+    # Altura fixa, com rolagem própria: sem isto um módulo de 200 linhas empurra
+    # a seção de dados para dois metros abaixo, e numa apresentação ninguém rola
+    # até lá.
+    st.code(fonte, language="python", line_numbers=True, height=520)
 
 st.divider()
 
@@ -143,7 +173,7 @@ churners = (dados[settings.target] == settings.positive_label).mean()
 esquerda, meio, direita = st.columns(3)
 esquerda.metric("Clientes", f"{len(dados):,}".replace(",", "."))
 meio.metric("Colunas", len(dados.columns))
-direita.metric("Taxa de churn", f"{churners:.1%}")
+direita.metric("Taxa de churn", f"{churners * 100:.1f}".replace(".", ",") + "%")
 
 st.caption(
     f"Base desbalanceada: {churners:.0%} de churn. É por isso que a acurácia não "
@@ -151,7 +181,42 @@ st.caption(
     f"{1 - churners:.0%}."
 )
 
-aba_tabela, aba_colunas, aba_resumo = st.tabs(["Tabela", "Colunas", "Resumo"])
+aba_quem, aba_tabela, aba_colunas, aba_resumo = st.tabs(
+    ["Quem cancela", "Tabela", "Colunas", "Resumo"]
+)
+
+with aba_quem:
+    st.caption(
+        f"Taxa de cancelamento por categoria. A linha de base é {churners:.0%} — "
+        "o que separa de verdade é o que se afasta dela."
+    )
+
+    coluna_1, coluna_2 = st.columns(2)
+    cortes = [
+        ("Contract", "Tipo de contrato", coluna_1),
+        ("InternetService", "Tipo de internet", coluna_2),
+        ("PaymentMethod", "Forma de pagamento", coluna_1),
+        ("TechSupport", "Suporte técnico", coluna_2),
+    ]
+    for coluna, titulo, onde in cortes:
+        with onde:
+            st.markdown(f"**{titulo}**")
+            taxa = (
+                dados.assign(cancelou=dados[settings.target] == settings.positive_label)
+                .groupby(coluna)["cancelou"]
+                .mean()
+                .reset_index()
+            )
+            st.altair_chart(
+                _barras(taxa, coluna, "cancelou", "taxa de churn", ".0%"),
+                use_container_width=True,
+            )
+
+    st.caption(
+        "Contrato mensal cancela sete vezes mais que o bienal. É por isso que "
+        "`Contract` é a feature que mais pesa no modelo — e por isso o contrato "
+        "de dados trata uma categoria nova ali como erro fatal, não como alerta."
+    )
 
 with aba_tabela:
     st.dataframe(dados, use_container_width=True, height=420)
