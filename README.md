@@ -1,178 +1,181 @@
 # prj_churn
 
-Projeto-fio-condutor do curso de MLOps: previsão de **churn** (classificação
-binária tabular, dataset Telco). O repositório é o caminho completo do script
-monolítico `train_churn.py` até um modelo **validado, versionado, rastreado,
-promovido, servido por HTTP e consumido por um front** — tudo reproduzível em
-container.
+Projeto-fio-condutor do curso de **MLOps** (IESB): previsão de **churn** —
+classificação binária tabular sobre o dataset Telco.
 
-O que o projeto responde, no fim: *dado um cliente, qual a probabilidade de ele
-cancelar — e de qual dado e de qual código essa resposta saiu?*
+O repositório é o caminho completo do script monolítico `train_churn.py` até um
+modelo **validado, versionado, rastreado, promovido, servido por HTTP e
+consumido por um front** — tudo reproduzível em container.
+
+A pergunta que o projeto responde, no fim:
+
+> *Dado um cliente, qual a probabilidade de ele cancelar — e **de qual dado e de
+> qual código** essa resposta saiu?*
+
+A segunda metade da pergunta é o que separa um notebook de um sistema. É ela que
+organiza todo o resto deste README.
 
 **No ar:** [prjchurn.streamlit.app](https://prjchurn.streamlit.app) — a pilha
-completa, não só o front. A barra lateral mostra `API · modelo v1`: cada
-previsão é uma chamada HTTP ao campeão promovido no MLflow Model Registry.
-
----
-
-## Sumário
+completa, não só o front. A barra lateral mostra `API · modelo v1`: cada previsão
+é uma chamada HTTP ao campeão promovido no MLflow Model Registry.
 
 | | |
 |---|---|
-| [O que está pronto](#o-que-está-pronto) | a pilha, encontro por encontro |
-| [Como rodar](#como-rodar) | local e em Docker |
-| [**Como a previsão melhorou**](#como-a-previsão-melhorou) | os números, e quanto deles é mérito do modelo |
-| [Como foi implementado](#como-foi-implementado) | cada camada, e a decisão por trás |
-| [**Dificuldades encontradas**](#dificuldades-encontradas) | os erros reais, e o que cada um ensinou |
-| [**Ressalvas e limites**](#ressalvas-e-limites) | onde este projeto não serve |
-| [Testes e CI](#testes-e-ci) | o que é provado a cada push |
-| [Estrutura](#estrutura) | o mapa dos arquivos |
+| **0,8206** | `roc_auc` no teste |
+| **0,7609** | `recall` — de 0,5602 no modelo inicial |
+| **126** | testes, CI verde a cada push |
+| **7.043** | clientes na base, 33% de churn |
 
 ---
 
-## O que está pronto
+## Como ler este README
 
-| Encontro | Entrega | Onde |
+Ele é longo porque cobre o projeto inteiro. Não precisa ser lido inteiro de uma
+vez — escolha a profundidade:
+
+| Se você tem | Leia | O que vai entender |
 |---|---|---|
-| 2 | config como contrato (Pydantic), pacote modular, ambiente travado (uv) | `config.py`, `pyproject.toml` |
-| 3 | reprodutibilidade em container; dado por volume, nunca em camada | `Dockerfile`, `compose.yml` |
-| 4 | contrato dos dados executável, com quarentena e alerta vs. erro | `schema.py`, `validation.py`, `quarentena.py` |
-| 5 | dado versionado por ponteiro; duas versões; deploy por `dvc pull` | `data/churn.csv.dvc`, `dvc.yaml` |
-| 6 | cada treino vira run, com linhagem `data_md5` + `git_commit` | `model.py`, `experiments.py`, `lineage.py` |
-| 7 | promoção a `@champion` com portão de métrica e rollback por alias | `registry.py` |
-| — | **ajuste fino**: busca aleatória em seis eixos | `tuning.py` |
-| — | **API**: o campeão atrás de HTTP, com contrato gerado do schema | `api.py` |
-| — | **front v1 e v2**: ver o projeto, e calcular o churn | `app/` |
+| **2 minutos** | [O que é, e o que resolve](#o-que-é-e-o-que-resolve) + [A pilha, em um diagrama](#a-pilha-em-um-diagrama) | o problema, a arquitetura e por que cada peça existe |
+| **10 minutos** | \+ [Como a previsão melhorou](#como-a-previsão-melhorou) e [Ressalvas e limites](#ressalvas-e-limites) | os números, e o que eles **não** provam |
+| **a íntegra** | \+ [Como foi implementado](#como-foi-implementado) e [Dificuldades encontradas](#dificuldades-encontradas) | cada decisão técnica e cada erro que custou tempo |
+| **quer rodar** | vá direto a [Como rodar](#como-rodar) | local, em Docker, ou publicado |
 
----
+As quatro seções em negrito abaixo são as que respondem ao enunciado do
+trabalho:
 
-## Como rodar
-
-### Na sua máquina
-
-```bash
-uv sync                               # ambiente travado pelo uv.lock
-./scripts/fetch_data.sh               # traz data/churn.csv (o Git não o guarda)
-
-uv run python -m churn.tuning         # busca + treina o vencedor  (~2 min)
-uv run python -m churn.registry       # registra e promove a @champion
-
-uv run --group api uvicorn churn.api:app         # API  → localhost:8000/docs
-uv run --group app streamlit run app/Inicio.py   # front → localhost:8501
-```
-
-Os quatro de uma vez, que é como se apresenta isto:
-
-```bash
-uv run --group api --group app python scripts/subir_front.py
-```
-
-Ele confere o dataset, promove um campeão se não houver, sobe a API em segundo
-plano, espera ela responder e só então abre o Streamlit — encerrando os dois
-juntos no fim. No Windows é o **`subir-front.bat`**, em duplo clique.
-
-Outros pontos de entrada:
-
-```bash
-uv run python -m churn.model          # um treino simples
-uv run python -m churn.experiments    # o grid do Encontro 6: 9 runs
-./scripts/mlflow_ui.sh                # a UI em localhost:5000
-uv run python scripts/relatorio.py --html   # os runs sem navegador nem servidor
-uv run python scripts/prever.py --n 10      # prever em lote, pela linha de comando
-uv run python scripts/conferir_api.py       # a API está servindo mesmo?
-uv run pytest                         # 122 testes
-```
-
-Os testes **não precisam do dataset** — usam amostras de `tests/conftest.py`.
-Quem precisa dele é o treino.
-
-> **Windows:** o PowerShell não roda `.sh`. Há quatro arquivos de duplo clique na
-> raiz — `subir-front.bat`, `ver-runs.bat`, `abrir-mlflow.bat` e
-> `atualizar.bat` — e o equivalente
-> em Python puro para o resto: `uv run python scripts/preparar.py`. O passo a
-> passo completo está em [`docs/rodar-local.md`](docs/rodar-local.md).
-
-### Em Docker
-
-```bash
-docker compose up dados       # 1. o CSV chega por dvc pull
-docker compose up tuning      # 2. a busca, e o treino do vencedor
-docker compose up promover    # 3. registra e aponta @champion
-docker compose up app         # 4. sobe a API e o front juntos
-```
-
-| serviço | porta | o que é |
-|---|---|---|
-| `dados` | — | `dvc pull`; roda até o fim e sai |
-| `treino` · `tuning` | — | treino simples · busca + vencedor |
-| `promover` | — | registra o melhor run e move o alias |
-| `api` | 8000 | o campeão atrás de HTTP |
-| `app` | 8501 | as duas páginas do front |
-| `mlflow` | 5000 | a UI dos experimentos |
-
-O `app` declara `depends_on: api (service_healthy)`, e **saudável aqui significa
-com modelo carregado**, não "a porta respondeu". Subir o front contra uma API sem
-campeão só adiantaria o erro para quem está olhando.
-
-### Publicar de graça, com a API junto
-
-Publicado em **[prjchurn.streamlit.app](https://prjchurn.streamlit.app)**, com
-esta configuração:
-
-| campo | valor |
+| | |
 |---|---|
-| plataforma | **Streamlit Community Cloud** (gratuito, sem cartão) |
-| Repository | `PiettroNaka/prj_churn` |
-| Branch | `main` |
-| Main file path | `app/Inicio.py` |
+| [**Como a previsão melhorou**](#como-a-previsão-melhorou) | os números, e quanto deles é mérito do modelo |
+| [**Como foi implementado**](#como-foi-implementado) | cada camada, e a decisão por trás |
+| [**Dificuldades encontradas**](#dificuldades-encontradas) | os dez erros reais, e o que cada um ensinou |
+| [**Ressalvas e limites**](#ressalvas-e-limites) | onde este projeto não serve |
 
-O deploy roda a **pilha inteira**, não só o front. A plataforma roda um processo
-só; em vez de o front passar a carregar modelo — o que apagaria a fronteira que
-o projeto inteiro defende —, **a API sobe ao lado dele**:
+Demais seções: [Testes e CI](#testes-e-ci) · [Como rodar](#como-rodar) ·
+[Estrutura](#estrutura) ·
+[Do script monolítico ao projeto](#do-script-monolítico-ao-projeto)
+
+---
+
+## O que é, e o que resolve
+
+### O ponto de partida
+
+O projeto começa num arquivo só, `train_churn.py`: lê um CSV de um caminho fixo,
+preenche os brancos com um número mágico (`fillna(2200)`), codifica as categorias
+no dataset inteiro, treina uma Random Forest e imprime a acurácia.
+
+Ele funciona. E é exatamente por funcionar que ele é um bom ponto de partida: o
+problema não é o modelo, é tudo em volta. Ninguém sabe qual CSV gerou aquele
+número, se o número de ontem é comparável ao de hoje, nem como alguém que não
+seja o autor faria o mesmo rodar.
+
+### O fio condutor
+
+Cada encontro do curso resolveu um problema que o anterior deixou em aberto.
+Lendo esta tabela de cima a baixo você tem o projeto inteiro em resumo:
+
+| Encontro | O problema que ficou em aberto | A entrega | Onde está |
+|---|---|---|---|
+| **2** | caminhos fixos no meio da lógica; números mágicos; vazamento de dados no encoder | config como contrato (Pydantic), pacote modular, ambiente travado (uv) | `config.py`, `pyproject.toml` |
+| **3** | "na minha máquina funciona" | reprodutibilidade em container; dado por volume, nunca em camada | `Dockerfile`, `compose.yml` |
+| **4** | dado ruim treina modelo ruim — **em silêncio** | contrato dos dados executável, com quarentena e alerta vs. erro | `schema.py`, `validation.py`, `quarentena.py` |
+| **5** | qual CSV gerou qual métrica? | dado versionado por ponteiro; duas versões; deploy por `dvc pull` | `data/churn.csv.dvc`, `dvc.yaml` |
+| **6** | o `print` mostra o número e o esquece | cada treino vira run, com linhagem `data_md5` + `git_commit` | `model.py`, `experiments.py`, `lineage.py` |
+| **7** | "qual era mesmo o run bom?" | promoção a `@champion` com portão de métrica e rollback por alias | `registry.py` |
+| **+** | o modelo continua preso no repositório | **ajuste fino**, **API** FastAPI, **front** v1 e v2, deploy público | `tuning.py`, `api.py`, `app/` |
+
+A última linha é o que o enunciado pediu além do curso: melhorar o modelo
+(ajuste fino), montar a API, montar o front em duas versões e pôr tudo em
+Docker.
+
+---
+
+## A pilha, em um diagrama
+
+Do ponteiro no Git até a tela. Cada etapa abaixo é código real deste
+repositório — a coluna da direita diz o que ela garante:
 
 ```
-Streamlit (porta pública)  →  FastAPI (127.0.0.1:8000)  →  modelo @champion
-             └──────────── o mesmo container ────────────┘
+  data/churn.csv.dvc                    o Git versiona o md5 e o tamanho;
+         │                               os bytes ficam no remote do DVC
+         │  dvc pull
+         ▼
+  churn.csv  ·  7.043 clientes, 33% de churn
+         │
+         ▼
+  contrato pandera  ──── reprova ────▶  artifacts/quarentena/<timestamp>/
+  21 colunas · faixas · categorias           o lote e o relatório das
+  coerência · relações entre colunas         violações, todas de uma vez
+         │
+         │  aprova
+         ▼
+  ajuste fino  ·  24 das 3.150 combinações, validação cruzada no treino
+         │
+         ▼
+  MLflow run   params · métricas · o pipeline · e as tags que dão o endereço:
+         │                         data_md5 (qual CSV) + git_commit (qual código)
+         ▼
+  portão  roc_auc ≥ 0,80  ─── barra ───▶  o run fica registrado,
+         │                                 o alias não se move
+         │  promove
+         ▼
+  Model Registry  ·  models:/churn@champion
+         │              promover é mover o alias; reverter é movê-lo de volta
+         ▼
+  FastAPI  ·  POST /prever          resolve o alias uma vez, na subida
+         │
+         ▼
+  Streamlit  ·  v1 ver o projeto, v2 prever     nunca carrega modelo:
+                                                fala HTTP com a API
 ```
 
-Na primeira visita à página de previsão, o app materializa o dataset, treina com
-a configuração vencedora, promove a `@champion` e sobe a API — uns 40 segundos,
-uma vez só. Depois a barra lateral mostra **"API · modelo v1"**, e cada previsão
-é uma chamada HTTP ao campeão promovido.
+Três propriedades do desenho valem mais que as caixas:
 
-Três coisas tornam isso possível, e nenhuma é padrão num projeto com DVC e
-MLflow:
+1. **O dado entra por um ponteiro, não por um arquivo.** O Git versiona o md5; os
+   bytes vêm do DVC. Trocar de dataset é uma linha de hash mudando.
+2. **Nada chega ao treino sem passar pelo contrato.** O que reprova vai para a
+   quarentena com o relatório, em vez de virar modelo.
+3. **O front nunca carrega modelo.** Ele fala HTTP com a API, e a API resolve o
+   alias. Trocar de campeão é mover um ponteiro — sem tocar numa linha do front.
 
-**O `requirements.txt`.** A plataforma instala por pip, não por uv. A última
-linha é `.` — é o que instala o pacote a partir do `pyproject.toml` e faz
-`from churn.config import settings` funcionar. Sem ela o app quebra na primeira
-linha de import, antes de desenhar qualquer coisa.
+### A linhagem, que é a tese do projeto
 
-**O dataset por HTTP.** Ele saiu do Git no Encontro 5, e o clone da plataforma é
-raso, então nem o histórico vem junto. O `churn.demonstracao` busca os bytes do
-commit em que ele ainda era versionado e **só os aceita se o md5 bater com o
-ponteiro `.dvc`** — transporte diferente, mesma verificação.
+Toda previsão tem endereço. É isto que torna respondível a segunda metade da
+pergunta lá de cima — *de qual dado e de qual código essa resposta saiu?*
 
-**A rede de segurança.** Se a API não subir (memória apertada, por exemplo), o
-front treina o modelo na própria sessão e **diz isso na barra lateral**: "Modo
-demonstração". Um número que sai de um modelo treinado na hora não é o mesmo que
-sai do campeão promovido, e quem olha tem o direito de saber qual é qual.
+```
+  Pergunta: esta previsão na tela — de onde ela veio?
 
-### E o Hugging Face Spaces?
+  churn@champion                   o alias que a API resolve na subida
+        │
+        │  aponta hoje para a versão 1 do modelo registrado,
+        ▼  que saiu de um run do MLflow, e esse run carrega duas tags:
+  MLflow run
+        │
+        ├─ data_md5    d390bd07b5514a2256a2396993b8b0e3
+        │      │
+        │      └─ é o md5 gravado em data/churn.csv.dvc  →  o CSV exato,
+        │         recuperável com dvc checkout, byte a byte
+        │
+        └─ git_commit  d7ee6e5
+               │
+               └─ o commit do código que treinou  →  recuperável com
+                  git checkout; vem com +alteracoes se não estava commitado
 
-A imagem existe em `deploy/spaces/` e é construída e testada pelo CI a cada
-push — ela roda a mesma pilha num container só. Mas o Hugging Face passou a
-**exigir plano pago** para Spaces com Docker; só os Static Spaces seguem livres,
-e eles não rodam Python. O guia está em
-[`docs/deploy-huggingface.md`](docs/deploy-huggingface.md), para quem tiver PRO.
+  E o caminho de volta também funciona: dado um CSV, quais modelos saíram dele.
+```
+
+Sem isso, "o modelo está com 82% de roc_auc" é uma frase sobre nada: não se
+sabe sobre qual dado foi medido, nem qual código a produziu, e portanto não se
+pode nem repetir a medição nem comparar com a de amanhã.
 
 ---
 
 ## Como a previsão melhorou
 
-Esta é a seção que responde "o que vocês fizeram para o modelo prever melhor".
-Ela tem três partes: o que mudou, quanto disso é mérito do modelo, e o que foi
-feito **no dado** para que a métrica não mentisse.
+Esta é a seção que responde *"o que vocês fizeram para o modelo prever melhor"*.
+Ela tem quatro partes: o que mudou, como foi feito, **quanto disso é mérito do
+modelo**, e o que foi feito no dado para que a métrica não mentisse.
 
 ### Os três estágios, medidos na mesma base
 
@@ -258,6 +261,9 @@ evitaram que o número subisse por motivo errado:
 ---
 
 ## Como foi implementado
+
+Uma subseção por camada, na mesma ordem do diagrama. Cada uma diz **o que foi
+feito** e **por que daquele jeito**.
 
 ### Configuração e ambiente (Encontro 2)
 
@@ -459,13 +465,15 @@ uv run --group app streamlit run app/Inicio.py   # localhost:8501
 **v1 (`app/Inicio.py`)** — título, código e dados. Não prevê nada, de propósito:
 um front que calcula antes de deixar ver o dado e o código vira uma caixa-preta
 bonita, e a caixa-preta é o que o curso passa doze encontros desmontando. O
-seletor abre qualquer módulo de `src/churn/`; as abas mostram a tabela, o tipo de
-cada coluna e o resumo estatístico.
+seletor abre qualquer módulo de `src/churn/`; as abas mostram quem cancela por
+categoria, a tabela, o tipo de cada coluna e o resumo estatístico.
 
 **v2 (`app/pages/1_Prever_churn.py`)** — os 19 parâmetros de um cliente e o churn
 calculado. O formulário é gerado do mesmo contrato: categoria vira `selectbox`
 com as opções reais, faixa vira `slider` com o piso e o teto. Não há como montar
-ali um cliente que a API recuse por domínio.
+ali um cliente que a API recuse por domínio. Cada campo traz, abaixo, uma linha
+explicando o que ele significa e como pesa no churn — e três perfis prontos
+(risco baixo, médio e alto) preenchem o cliente inteiro em um clique.
 
 O cálculo não acontece na página — ela chama a API. É o que separa o front do
 modelo: trocar de campeão é mover um alias, sem tocar numa linha do front.
@@ -557,26 +565,52 @@ linhas que já tinha visto byte a byte.
 Consequência prática: a versão 1 do modelo registrado foi promovida com métrica
 inflada. O filtro por `data_md5` em `registry.candidato()` existe por causa disso.
 
-### 7. Uma ferramenta de relatório ditando a pilha numérica
+### 7. A ordem das colunas, que funcionava por acidente
+
+`ValueError: The feature names should match those that were passed during fit.`
+
+O pipeline montava as features na ordem em que o schema as declara; o modelo foi
+treinado na ordem em que o CSV as traz. As duas diferem. Nunca tinha aparecido
+porque o MLflow, ao aplicar a assinatura, reordenava as colunas em silêncio — o
+pipeline estava errado e **funcionava pelo conserto de outra camada**. Chamado
+fora do MLflow, quebrou.
+
+Hoje `preparar()` reordena para `feature_names_in_` e levanta erro nomeando a
+coluna que falta. Dois testes de regressão: um embaralha as colunas de propósito,
+o outro remove uma.
+
+### 8. Uma ferramenta de relatório ditando a pilha numérica
 
 `ydata-profiling` como dependência do projeto rebaixava numpy e scipy. Com lock
 único, uma ferramenta de relatório passaria a decidir a versão do numpy que
 treina o modelo — justo o que os Encontros 2 e 3 travaram. Ele roda em ambiente
 efêmero (`uvx`), sem encostar no ambiente travado.
 
-### 8. O `dvc repro` que rodava sem nada ter mudado
+### 9. O `dvc repro` que rodava sem nada ter mudado
 
 `.dvcignore` não excluía `__pycache__/`. O hash de `src/churn` mudava a cada
 execução, e o `repro` retreinava o modelo por causa de bytecode.
 
-### 9. O registro de avisos que nunca terminava
+### 10. O registro de avisos que nunca terminava
 
 `warnings.catch_warnings(record=True)` devolve a lista **viva**. Reemitir um
 aviso enquanto se percorre essa lista o grava de volta nela, e o laço não termina
 — o pytest simplesmente travava. A correção é copiar (`list(capturados)`) e
 registrar **fora** do bloco.
 
-### 10. Atrito de ferramenta, que também custa tempo
+### 11. O deploy que instalava uma cópia velha do pacote
+
+No Streamlit Cloud, o app quebrou com `ImportError: cannot import name
+'subir_api_embutida'`. A plataforma atualiza o repositório a cada push, mas só
+reinstala as dependências quando o `requirements.txt` muda — então `app/` ficava
+novo e o pacote `churn` instalado ficava velho.
+
+Duas correções: a última linha do `requirements.txt` é `-e .` (instalação
+editável, o pacote vem de `src/`), e os dois arquivos do front inserem `src/` no
+`sys.path` antes de importar. O repositório é a fonte; a cópia é um artefato do
+deploy.
+
+### 12. Atrito de ferramenta, que também custa tempo
 
 - **PowerShell não roda `.sh`**, e uma janela nova abre na pasta pessoal: três
   rodadas de `not a git repository` antes de a causa ficar clara. Resolvido por
@@ -650,19 +684,25 @@ Onde este projeto **não** serve, dito antes que alguém descubra sozinho.
   7 existe para dar. Serve para a vitrine pública; não serve como deploy.
 - **O portão de promoção (0,80) é um piso de sanidade, não uma meta.** Ele barra
   um modelo quebrado, não um modelo medíocre.
+- **Não houve deploy em AWS/EC2**, como o plano previa. A AWS é nuvem paga — as
+  instâncias do *free tier* têm 1 GB de RAM, e a imagem do front instala 105
+  pacotes. O `compose.yml` roda em qualquer VM Linux, EC2 inclusive; o bloqueio
+  que existia (o remote do DVC ser pasta local) foi corrigido, e hoje o dataset é
+  buscado por HTTP com o md5 conferido. A escolha foi publicar no Streamlit
+  Community Cloud, que é gratuito.
 
 ---
 
 ## Testes e CI
 
 ```bash
-uv run pytest          # 122 testes
+uv run pytest          # 126 testes
 ```
 
 Os testes não cobrem "o modelo acerta" — cobrem as **juntas** onde as coisas
 quebram caladas: o contrato traduzido diverge da fonte? o vencedor da busca
-sobrevive à viagem até o próximo treino? a assinatura exige o alvo? o padrão do
-formulário é aceito pela API?
+sobrevive à viagem até o próximo treino? a assinatura exige o alvo? a ordem das
+colunas mudou? o padrão do formulário é aceito pela API?
 
 O CI (`.github/workflows/docker.yml`) roda a cada push e **prova** o que o README
 afirma, em vez de afirmá-lo:
@@ -693,6 +733,128 @@ A API está servindo o modelo promovido.
 
 ---
 
+## Como rodar
+
+### Na sua máquina
+
+```bash
+uv sync                               # ambiente travado pelo uv.lock
+./scripts/fetch_data.sh               # traz data/churn.csv (o Git não o guarda)
+
+uv run python -m churn.tuning         # busca + treina o vencedor  (~2 min)
+uv run python -m churn.registry       # registra e promove a @champion
+
+uv run --group api uvicorn churn.api:app         # API  → localhost:8000/docs
+uv run --group app streamlit run app/Inicio.py   # front → localhost:8501
+```
+
+Os quatro de uma vez, que é como se apresenta isto:
+
+```bash
+uv run --group api --group app python scripts/subir_front.py
+```
+
+Ele confere o dataset, promove um campeão se não houver, sobe a API em segundo
+plano, espera ela responder e só então abre o Streamlit — encerrando os dois
+juntos no fim. No Windows é o **`subir-front.bat`**, em duplo clique.
+
+Outros pontos de entrada:
+
+```bash
+uv run python -m churn.model          # um treino simples
+uv run python -m churn.experiments    # o grid do Encontro 6: 9 runs
+./scripts/mlflow_ui.sh                # a UI em localhost:5000
+uv run python scripts/relatorio.py --html   # os runs sem navegador nem servidor
+uv run python scripts/prever.py --n 10      # prever em lote, pela linha de comando
+uv run python scripts/conferir_api.py       # a API está servindo mesmo?
+uv run pytest                         # 126 testes
+```
+
+Os testes **não precisam do dataset** — usam amostras de `tests/conftest.py`.
+Quem precisa dele é o treino.
+
+> **Windows:** o PowerShell não roda `.sh`. Há quatro arquivos de duplo clique na
+> raiz — `subir-front.bat`, `ver-runs.bat`, `abrir-mlflow.bat` e
+> `atualizar.bat` — e o equivalente
+> em Python puro para o resto: `uv run python scripts/preparar.py`. O passo a
+> passo completo está em [`docs/rodar-local.md`](docs/rodar-local.md).
+
+### Em Docker
+
+```bash
+docker compose up dados       # 1. o CSV chega por dvc pull
+docker compose up tuning      # 2. a busca, e o treino do vencedor
+docker compose up promover    # 3. registra e aponta @champion
+docker compose up app         # 4. sobe a API e o front juntos
+```
+
+| serviço | porta | o que é |
+|---|---|---|
+| `dados` | — | `dvc pull`; roda até o fim e sai |
+| `treino` · `tuning` | — | treino simples · busca + vencedor |
+| `promover` | — | registra o melhor run e move o alias |
+| `api` | 8000 | o campeão atrás de HTTP |
+| `app` | 8501 | as duas páginas do front |
+| `mlflow` | 5000 | a UI dos experimentos |
+
+O `app` declara `depends_on: api (service_healthy)`, e **saudável aqui significa
+com modelo carregado**, não "a porta respondeu". Subir o front contra uma API sem
+campeão só adiantaria o erro para quem está olhando.
+
+### Publicar de graça, com a API junto
+
+Publicado em **[prjchurn.streamlit.app](https://prjchurn.streamlit.app)**, com
+esta configuração:
+
+| campo | valor |
+|---|---|
+| plataforma | **Streamlit Community Cloud** (gratuito, sem cartão) |
+| Repository | `PiettroNaka/prj_churn` |
+| Branch | `main` |
+| Main file path | `app/Inicio.py` |
+
+O deploy roda a **pilha inteira**, não só o front. A plataforma roda um processo
+só; em vez de o front passar a carregar modelo — o que apagaria a fronteira que
+o projeto inteiro defende —, **a API sobe ao lado dele**:
+
+```
+Streamlit (porta pública)  →  FastAPI (127.0.0.1:8000)  →  modelo @champion
+             └──────────── o mesmo container ────────────┘
+```
+
+Na primeira visita à página de previsão, o app materializa o dataset, treina com
+a configuração vencedora, promove a `@champion` e sobe a API — uns 40 segundos,
+uma vez só. Depois a barra lateral mostra **"API · modelo v1"**, e cada previsão
+é uma chamada HTTP ao campeão promovido.
+
+Três coisas tornam isso possível, e nenhuma é padrão num projeto com DVC e
+MLflow:
+
+**O `requirements.txt`.** A plataforma instala por pip, não por uv. A última
+linha é `-e .` — é o que instala o pacote a partir do `pyproject.toml` e faz
+`from churn.config import settings` funcionar, apontando para `src/` em vez de
+para uma cópia que envelhece (ver dificuldade nº 11).
+
+**O dataset por HTTP.** Ele saiu do Git no Encontro 5, e o clone da plataforma é
+raso, então nem o histórico vem junto. O `churn.demonstracao` busca os bytes do
+commit em que ele ainda era versionado e **só os aceita se o md5 bater com o
+ponteiro `.dvc`** — transporte diferente, mesma verificação.
+
+**A rede de segurança.** Se a API não subir (memória apertada, por exemplo), o
+front treina o modelo na própria sessão e **diz isso na barra lateral**: "Modo
+demonstração". Um número que sai de um modelo treinado na hora não é o mesmo que
+sai do campeão promovido, e quem olha tem o direito de saber qual é qual.
+
+### E o Hugging Face Spaces?
+
+A imagem existe em `deploy/spaces/` e é construída e testada pelo CI a cada
+push — ela roda a mesma pilha num container só. Mas o Hugging Face passou a
+**exigir plano pago** para Spaces com Docker; só os Static Spaces seguem livres,
+e eles não rodam Python. O guia está em
+[`docs/deploy-huggingface.md`](docs/deploy-huggingface.md), para quem tiver PRO.
+
+---
+
 ## Estrutura
 
 ```
@@ -716,10 +878,10 @@ prj_churn/
 │  └─ demonstracao.py # o modo vitrine: sem API, sem Registry, sem CSV no disco
 ├─ app/              # Streamlit: Inicio.py (v1) + pages/ (v2)
 ├─ requirements.txt  # para plataformas que instalam por pip (Streamlit Cloud)
-├─ tests/            # 122 testes
+├─ tests/            # 126 testes
 ├─ scripts/          # preparar · relatorio · fetch_data · mlflow_ui · prever
 │                    # profiling · gerar_v2 · alternar_versao · quebra_proposital
-│                    # conferir_run · conferir_api
+│                    # conferir_run · conferir_api · subir_front
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
 ├─ deploy/spaces/    # Dockerfile + README do Hugging Face Spaces
 ├─ docs/             # rodar-local.md · data-pipeline.md · deploy-huggingface.md
@@ -734,6 +896,8 @@ prj_churn/
 ---
 
 ## Do script monolítico ao projeto
+
+O resumo de uma página: o que havia em `train_churn.py`, e o que está aqui.
 
 | `train_churn.py` | o que está aqui |
 |---|---|
