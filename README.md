@@ -1,6 +1,6 @@
 # prj_churn
 
-Projeto-fio-condutor do curso de **MLOps** (IESB): previsão de **churn** —
+Projeto do curso de **MLOps** (IESB): previsão de **churn** —
 classificação binária tabular sobre o dataset Telco.
 
 O repositório é o caminho completo do script monolítico `train_churn.py` até um
