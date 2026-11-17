@@ -7,7 +7,7 @@
 #   │   │  API (FastAPI)     │ ◀──────── │   tabela clientes  │  │
 #   │   │  o CSV, na carga   │ ──carga─▶ │                    │  │
 #   │   └────────────────────┘           └────────────────────┘  │
-#   │        porta 8501                    só na rede interna    │
+#   │        porta 80                      só na rede interna    │
 #   └────────────────────────────────────────────────────────────┘
 #
 # Este arquivo é o de PRODUÇÃO. O compose.yml continua sendo o de
@@ -68,8 +68,19 @@ services:
       CHURN_MLFLOW_TRACKING_URI: sqlite:////app/mlruns/mlflow.db
       CHURN_API_URL: http://127.0.0.1:8000
     ports:
-      # só o front sai para fora; a API fica em 127.0.0.1 dentro do container
-      - "8501:8501"
+      # Porta 80 no host, não 8501.
+      #
+      # O Streamlit escuta 8501 dentro do container, e isso não muda. O que
+      # muda é por onde ele sai: muita rede corporativa e de faculdade bloqueia
+      # a saída em portas não padrão, e o sintoma é um timeout que parece
+      # servidor fora do ar — foi exatamente o que aconteceu aqui. A 80 é a
+      # porta de HTTP e ninguém a bloqueia.
+      #
+      # De quebra o endereço fica sem porta: http://<IP> em vez de
+      # http://<IP>:8501. Para publicar noutra porta: PORTA_PUBLICA=8501.
+      #
+      # Só o front sai para fora; a API fica em 127.0.0.1 dentro do container.
+      - "${PORTA_PUBLICA:-80}:8501"
     volumes:
       # os runs e o modelo promovido sobrevivem ao container, pelo mesmo
       # motivo do volume do banco

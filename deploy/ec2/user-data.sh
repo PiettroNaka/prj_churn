@@ -114,12 +114,24 @@ linhas=$(docker compose -f compose.ec2.yml exec -T postgres \
 echo "linhas na tabela clientes: ${linhas:-?}"
 [ "$linhas" = "7043" ] || echo "AVISO: esperava 7043 linhas; veio '${linhas:-vazio}'"
 
-ip=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/public-ipv4 || echo "<IP-DA-INSTANCIA>")
+# O IP vem do serviço de metadados. Precisa de token: as instâncias novas vêm
+# com IMDSv2 obrigatório, e a consulta antiga (um GET simples) volta vazia sem
+# erro nenhum — foi o que deixou esta mensagem sair como "http://:80".
+token=$(curl -sX PUT --max-time 5 "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null)
+ip=$(curl -s --max-time 5 -H "X-aws-ec2-metadata-token: ${token}" \
+  "http://169.254.169.254/latest/meta-data/public-ipv4" 2>/dev/null)
+[ -n "$ip" ] || ip="<IP-DA-INSTANCIA>"
+
+porta="${PORTA_PUBLICA:-80}"
+endereco="http://${ip}"
+[ "$porta" = "80" ] || endereco="http://${ip}:${porta}"
+
 marco "PRONTO"
 echo
-echo "   O front está no ar em:  http://${ip}:8501"
+echo "   O front está no ar em:  ${endereco}"
 echo
-echo "   Se não abrir, falta liberar a porta 8501 no grupo de segurança."
+echo "   Se não abrir, falta liberar a porta ${porta} no grupo de segurança."
 
 # ---------------------------------------------------------------------------
 # PARA ACOMPANHAR OU DEPURAR, por SSH:

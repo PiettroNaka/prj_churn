@@ -377,7 +377,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: senha-de-ci-nao-reaproveitar
         run: |
-          curl -fsS http://localhost:8501/_stcore/health >/dev/null && echo "ok   front no ar"
+          curl -fsS http://localhost/_stcore/health >/dev/null && echo "ok   front no ar na porta 80"
           docker compose -f compose.ec2.yml exec -T web \
             /app/.venv/bin/python - <<'PY'
           import json, urllib.request
@@ -404,12 +404,12 @@ jobs:
           # Controle positivo primeiro: se nem a porta do web aparecer, é esta
           # verificação que está quebrada, e não o compose. Sem ele, um grep que
           # nunca casa passaria por "o banco não publicou nada".
-          if ! echo "$web" | grep -q '"HostPort":"8501"'; then
+          if ! echo "$web" | grep -q '"HostPort":"80"'; then
             echo "a verificação não enxerga nem a porta publicada do web"
             echo "=> inconclusiva; não afirmo nada sobre o banco"
             exit 1
           fi
-          echo "ok   o controle positivo enxerga a porta 8501 do web"
+          echo "ok   o controle positivo enxerga a porta 80 do web"
 
           if echo "$banco" | grep -q 'HostPort'; then
             echo "o Postgres publicou porta no host — não deveria"
