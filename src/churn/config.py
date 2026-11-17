@@ -29,6 +29,12 @@ class Settings(BaseSettings):
 
     # dados
     data_path: Path = Path("data/churn.csv")
+    #: Quando definida, o pipeline lê o dataset do Postgres em vez do CSV.
+    #: None (o padrão) mantém o caminho de arquivo — é o que os testes, o
+    #: `dvc repro` e quem roda na própria máquina usam. O deploy em EC2 define
+    #: esta variável, e só por isso o mesmo código passa a ler do banco:
+    #:   CHURN_DATABASE_URL=postgresql+psycopg://churn:senha@postgres:5432/churn
+    database_url: str | None = None
     id_column: str = "customerID"
     target: str = "Churn"
     positive_label: str = "Yes"

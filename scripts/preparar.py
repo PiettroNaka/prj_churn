@@ -52,7 +52,18 @@ def confere(esperado: str) -> bool:
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=RAIZ, capture_output=True)
+    """Roda um comando git; sem git instalado, devolve uma falha em vez de estourar.
+
+    A imagem da aplicação (``Dockerfile.web``) é uma bookworm-slim e não traz
+    git — não precisa dele para nada além desta recuperação. Sem este tratamento
+    o ``subprocess.run`` levantaria ``FileNotFoundError``, que não é a falha que
+    o chamador espera: ele checa o returncode para então cair na rede de
+    segurança por HTTP, e a exceção pularia a rede de segurança inteira.
+    """
+    try:
+        return subprocess.run(["git", *args], cwd=RAIZ, capture_output=True)
+    except (FileNotFoundError, OSError):
+        return subprocess.CompletedProcess(args=args, returncode=127, stdout=b"", stderr=b"")
 
 
 def preparar_dado() -> None:

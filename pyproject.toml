@@ -30,6 +30,13 @@ app = [
     "streamlit>=1.40",
     "requests>=2.32",
 ]
+# O dado passa a morar em Postgres (o desenho do EC2: um container para o
+# banco, outro para a aplicação). Grupo à parte pela mesma régua dos demais:
+# quem só treina a partir de um CSV não precisa de driver de banco.
+db = [
+    "psycopg[binary]>=3.2",
+    "sqlalchemy>=2.0",
+]
 dev = [
     "pytest>=8.0",
     # TestClient do FastAPI: testa a API sem subir servidor nem abrir porta.

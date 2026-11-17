@@ -44,6 +44,37 @@ def preparar_dado() -> None:
     passo(1, "dataset")
     if _rodar(str(RAIZ / "scripts" / "preparar.py"), "--so-dado") != 0:
         raise SystemExit("ERRO: não consegui materializar o dataset.")
+    semear_banco()
+
+
+def semear_banco() -> None:
+    """Com ``CHURN_DATABASE_URL`` definida, leva o CSV para dentro do Postgres.
+
+    É o arranjo do deploy em EC2: um container para a aplicação, outro para o
+    banco. Sem a variável não faz nada, e o projeto segue lendo do arquivo — é
+    assim que o mesmo comando serve a máquina de quem desenvolve e o servidor.
+
+    A carga é idempotente: com a tabela populada, não recarrega. O container
+    sobe de novo a cada deploy e reler 7 mil linhas a cada subida não serviria
+    a ninguém.
+    """
+    from churn.config import settings
+
+    if not settings.database_url:
+        return
+
+    from churn.db import contar, esperar, motor, semear
+
+    maquina = motor(settings.database_url)
+    print("      banco configurado; esperando ele aceitar conexão")
+    esperar(maquina)
+
+    antes = contar(maquina)
+    total = semear(maquina, RAIZ / settings.data_path)
+    if antes == total:
+        print(f"      a tabela já tinha {total} linhas")
+    else:
+        print(f"      {total} linhas carregadas, validadas pelo contrato")
 
 
 def preparar_campeao() -> None:

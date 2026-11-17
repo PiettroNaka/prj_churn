@@ -1,0 +1,97 @@
+# A pilha do deploy em AWS EC2 — dois containers, como no desenho.
+#
+#   ┌─ instância EC2 ────────────────────────────────────────────┐
+#   │                                                            │
+#   │   ┌─ web ──────────────┐           ┌─ postgres ─────────┐  │
+#   │   │  Front (Streamlit) │ ────────▶ │                    │  │
+#   │   │  API (FastAPI)     │ ◀──────── │   tabela clientes  │  │
+#   │   │  o CSV, na carga   │ ──carga─▶ │                    │  │
+#   │   └────────────────────┘           └────────────────────┘  │
+#   │        porta 8501                    só na rede interna    │
+#   └────────────────────────────────────────────────────────────┘
+#
+# Este arquivo é o de PRODUÇÃO. O compose.yml continua sendo o de
+# desenvolvimento, com os serviços separados (dados, tuning, promover, api,
+# app, mlflow) — lá a separação entre API e front em dois containers é útil,
+# aqui ela custaria uma segunda imagem de 105 pacotes numa instância de 1 GB.
+#
+#   docker compose -f compose.ec2.yml up -d --build
+#   docker compose -f compose.ec2.yml logs -f web
+#   docker compose -f compose.ec2.yml ps
+#
+# A senha vem de um arquivo .env ao lado deste, que NÃO vai para o Git:
+#   POSTGRES_PASSWORD=<algo longo e aleatório>
+
+services:
+  # O banco. Imagem oficial, nada construído por nós: um Postgres que alguém
+  # mantém é melhor que um Postgres que nós mantemos.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: churn
+      POSTGRES_DB: churn
+      # sem valor padrão de propósito: o compose recusa subir sem a variável,
+      # e é melhor falhar na hora do que rodar com uma senha que todos sabem
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes:
+      # volume nomeado: o dado sobrevive a `down`, a rebuild e a reboot da
+      # instância. Sem isto, recriar o container apagaria a tabela.
+      - dados-postgres:/var/lib/postgresql/data
+    healthcheck:
+      # "saudável" aqui é aceitando conexão, não "o processo existe"
+      test: ["CMD-SHELL", "pg_isready -U churn -d churn"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # SEM `ports`. O banco só é alcançável pela rede interna do compose, pelo
+    # nome `postgres`. Publicar 5432 na instância o exporia à internet, e o
+    # grupo de segurança da EC2 seria a única coisa entre ele e o mundo.
+
+  # A aplicação: front e API no mesmo container.
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        # não basta "subiu": o Postgres leva alguns segundos para aceitar
+        # conexão, e sem esperar o container morre no primeiro connect e o
+        # compose o reinicia num laço
+        condition: service_healthy
+    environment:
+      # ESTA é a linha que troca o CSV pelo banco. O código é o mesmo; o que
+      # muda é a origem que a config aponta.
+      CHURN_DATABASE_URL: postgresql+psycopg://churn:${POSTGRES_PASSWORD}@postgres:5432/churn
+      CHURN_MLFLOW_TRACKING_URI: sqlite:////app/mlruns/mlflow.db
+      CHURN_API_URL: http://127.0.0.1:8000
+    ports:
+      # só o front sai para fora; a API fica em 127.0.0.1 dentro do container
+      - "8501:8501"
+    volumes:
+      # os runs e o modelo promovido sobrevivem ao container, pelo mesmo
+      # motivo do volume do banco
+      - mlruns:/app/mlruns
+      - artefatos:/app/artifacts
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - |
+          import json, sys, urllib.request
+          corpo = json.load(urllib.request.urlopen("http://127.0.0.1:8000/saude"))
+          sys.exit(0 if corpo.get("status") == "ok" else 1)
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # a primeira subida materializa o dataset, carrega o banco, treina e
+      # promove: dá uns três minutos numa t3.small
+      start_period: 300s
+
+volumes:
+  dados-postgres:
+  mlruns:
+  artefatos:
