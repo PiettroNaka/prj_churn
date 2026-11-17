@@ -390,8 +390,30 @@ jobs:
         env:
           POSTGRES_PASSWORD: senha-de-ci-nao-reaproveitar
         run: |
-          if docker compose -f compose.ec2.yml port postgres 5432 2>/dev/null; then
-            echo "o Postgres publicou uma porta no host — não deveria"; exit 1
+          portas() {
+            docker inspect --format '{{json .NetworkSettings.Ports}}' \
+              "$(docker compose -f compose.ec2.yml ps -q "$1")"
+          }
+          # `docker compose port` NÃO serve aqui: sem porta publicada ele
+          # imprime "invalid IP:0" e mesmo assim sai com 0. O que distingue os
+          # dois casos é a presença de HostPort no inspect.
+          banco=$(portas postgres); web=$(portas web)
+          echo "postgres: $banco"
+          echo "web:      $web"
+
+          # Controle positivo primeiro: se nem a porta do web aparecer, é esta
+          # verificação que está quebrada, e não o compose. Sem ele, um grep que
+          # nunca casa passaria por "o banco não publicou nada".
+          if ! echo "$web" | grep -q '"HostPort":"8501"'; then
+            echo "a verificação não enxerga nem a porta publicada do web"
+            echo "=> inconclusiva; não afirmo nada sobre o banco"
+            exit 1
+          fi
+          echo "ok   o controle positivo enxerga a porta 8501 do web"
+
+          if echo "$banco" | grep -q 'HostPort'; then
+            echo "o Postgres publicou porta no host — não deveria"
+            exit 1
           fi
           echo "ok   o Postgres só existe na rede interna"
 
