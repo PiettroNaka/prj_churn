@@ -8,13 +8,13 @@ ser tabela.
   ┌─ instância EC2 ─────────────────────────────────────────────┐
   │                                                             │
   │   ┌─ web ───────────────┐          ┌─ postgres ──────────┐  │
-  │   │  Streamlit  :8501   │ ───────▶ │                     │  │
+  │   │  Streamlit  :80     │ ───────▶ │                     │  │
   │   │  FastAPI    :8000   │ ◀─────── │   tabela clientes   │  │
   │   │  o CSV, só na carga │ ──carga─▶│   7.043 linhas      │  │
   │   └─────────────────────┘          └─────────────────────┘  │
   │          ▲                           sem porta publicada    │
   └──────────┼──────────────────────────────────────────────────┘
-             │ :8501
+             │ :80
        o navegador
 ```
 
@@ -43,12 +43,12 @@ linhas entraram na tabela.
 
 1. **Launch instance** → Ubuntu Server 24.04 LTS, `t3.small` (ou `t3.micro` do
    free tier), disco **20 GB**.
-2. Grupo de segurança: libere a **8501** para `0.0.0.0/0` e o **22** só para o
+2. Grupo de segurança: libere a **80** para `0.0.0.0/0` e o **22** só para o
    seu IP (detalhes no passo 2 abaixo).
 3. **Advanced details** → role até **User data** → cole o conteúdo de
    `deploy/ec2/user-data.sh`.
 4. **Launch**. Espere de 8 a 20 minutos conforme a instância.
-5. Abra **`http://<IP-PÚBLICO>:8501`**.
+5. Abra **`http://<IP-PÚBLICO>`**.
 
 Para acompanhar, se quiser (não é necessário):
 
@@ -94,10 +94,15 @@ Duas regras de entrada, e só:
 | Tipo | Porta | Origem | Para quê |
 |---|---|---|---|
 | SSH | 22 | **o seu IP** (`Meu IP` no console) | você entrar na máquina |
-| TCP personalizado | 8501 | `0.0.0.0/0` | o professor abrir o front |
+| HTTP | 80 | `0.0.0.0/0` | o professor abrir o front |
 
 Não abra a 5432. O banco não publica porta nenhuma; abri-la no grupo de
 segurança não o tornaria acessível, só daria a impressão de que é para estar.
+
+**Por que a 80 e não a 8501:** muita rede de faculdade e de empresa bloqueia a
+saída em portas não padrão. O sintoma é um timeout no navegador que parece
+servidor fora do ar — e não é. A 80 é a porta de HTTP e ninguém a bloqueia. De
+quebra o endereço fica sem porta, que é melhor para apresentar.
 
 Deixar o SSH em `0.0.0.0/0` é o erro clássico: põe o seu IP.
 
@@ -192,7 +197,7 @@ docker compose -f compose.ec2.yml exec web \
   /app/.venv/bin/python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/modelo').read().decode())"
 ```
 
-E no navegador: **`http://<IP-PÚBLICO>:8501`**
+E no navegador: **`http://<IP-PÚBLICO>`**
 
 É `http`, não `https` — não há certificado aqui. O navegador vai avisar, e está
 correto avisar; ver as [Ressalvas](#ressalvas) no fim.
@@ -249,7 +254,7 @@ espera o healthcheck, e o código ainda espera a conexão por até 30s, então i
 É proposital: melhor recusar do que subir com uma senha que todo mundo conhece.
 
 **A página não abre, mas `docker compose ps` diz `healthy`.** É o grupo de
-segurança: falta a regra de entrada na 8501 (passo 2).
+segurança: falta a regra de entrada na 80 (passo 2).
 
 **O Streamlit abre e diz "Modo demonstração".** A API não subiu dentro do
 container. O front cai para treinar na sessão em vez de quebrar, e avisa na

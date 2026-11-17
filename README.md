@@ -495,13 +495,13 @@ tabela.
 ```
   ┌─ instância EC2 ─────────────────────────────────────────────┐
   │   ┌─ web ───────────────┐          ┌─ postgres ──────────┐  │
-  │   │  Streamlit  :8501   │ ───────▶ │                     │  │
+  │   │  Streamlit  :80     │ ───────▶ │                     │  │
   │   │  FastAPI    :8000   │ ◀─────── │   tabela clientes   │  │
   │   │  o CSV, só na carga │ ──carga─▶│   7.043 linhas      │  │
   │   └─────────────────────┘          └─────────────────────┘  │
   │          ▲                           sem porta publicada    │
   └──────────┼──────────────────────────────────────────────────┘
-             │ :8501  →  o navegador
+             │ :80    →  o navegador
 ```
 
 O passo a passo completo está em [`docs/deploy-ec2.md`](docs/deploy-ec2.md).
@@ -934,7 +934,7 @@ docker compose -f compose.ec2.yml up -d --build
 
 | serviço | porta | o que é |
 |---|---|---|
-| `web` | 8501 | Streamlit + FastAPI no mesmo container |
+| `web` | 80 | Streamlit + FastAPI no mesmo container |
 | `postgres` | — | o dataset em tabela; **sem porta publicada** |
 
 A aplicação faz a sequência de partida sozinha: materializa o CSV, carrega as
