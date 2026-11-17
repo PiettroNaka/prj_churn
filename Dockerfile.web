@@ -1,0 +1,53 @@
+# A imagem da aplicação para o deploy em EC2: front + API no mesmo container.
+#
+# No desenvolvimento, `api` e `app` são dois serviços — é o arranjo mais limpo,
+# e é o que o compose.yml usa. Aqui eles vão juntos de propósito: o desenho do
+# deploy pede dois containers na instância, um para a aplicação e outro para o
+# banco, e a fronteira que o projeto defende não é a de processos, é a de
+# responsabilidades. O front continua sem carregar modelo: ele fala HTTP com a
+# API em 127.0.0.1:8000, que por sua vez resolve o alias @champion. Trocar de
+# campeão segue sendo mover um ponteiro.
+#
+# Três grupos de dependências, e não o projeto inteiro: `api` (FastAPI,
+# uvicorn), `app` (Streamlit) e `db` (driver do Postgres). O `data` entra
+# porque o CSV ainda chega por `dvc pull` quando há remote.
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+
+ENV UV_LINK_MODE=copy \
+    MLFLOW_DISABLE_TELEMETRY=true \
+    # o front fala com a API dentro do próprio container
+    CHURN_API_URL=http://127.0.0.1:8000
+
+WORKDIR /app
+
+# Dependências antes do código: mudar um .py não reinstala o mundo.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project --no-dev \
+        --group api --group app --group db --group data
+
+COPY README.md ./
+COPY src/ ./src/
+RUN uv sync --frozen --no-dev --group api --group app --group db --group data
+
+# O ponteiro do DVC vai na imagem; os BYTES do CSV não. Na subida o
+# scripts/preparar.py tenta `dvc pull` e, sem remote alcançável, busca por HTTP
+# conferindo o md5 contra este ponteiro. Transporte diferente, mesma verificação.
+COPY data/churn.csv.dvc ./data/
+COPY dvc.yaml dvc.lock .dvcignore ./
+COPY scripts/ ./scripts/
+
+# As páginas por último: mudam com frequência e não entram na resolução de deps.
+COPY app/ ./app/
+
+EXPOSE 8501 8000
+
+# Um comando só, que faz a sequência inteira e diz em que passo está:
+#   1. materializa o CSV e o carrega no Postgres (validando pelo contrato)
+#   2. treina e promove um campeão, se ainda não houver
+#   3. sobe a API em segundo plano e espera ela responder COM modelo carregado
+#   4. sobe o Streamlit em primeiro plano
+# Sair do Streamlit encerra a API junto — sem processo órfão segurando a porta.
+CMD ["uv", "run", "--frozen", "--no-dev", \
+     "--group", "api", "--group", "app", "--group", "db", "--group", "data", \
+     "python", "scripts/subir_front.py", \
+     "--endereco", "0.0.0.0", "--sem-navegador"]

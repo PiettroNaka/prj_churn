@@ -23,7 +23,7 @@ completa, não só o front. A barra lateral mostra `API · modelo v1`: cada prev
 |---|---|
 | **0,8206** | `roc_auc` no teste |
 | **0,7609** | `recall` — de 0,5602 no modelo inicial |
-| **126** | testes, CI verde a cada push |
+| **136** | testes, CI verde a cada push |
 | **7.043** | clientes na base, 33% de churn |
 
 ---
@@ -47,7 +47,7 @@ trabalho:
 |---|---|
 | [**Como a previsão melhorou**](#como-a-previsão-melhorou) | os números, e quanto deles é mérito do modelo |
 | [**Como foi implementado**](#como-foi-implementado) | cada camada, e a decisão por trás |
-| [**Dificuldades encontradas**](#dificuldades-encontradas) | os dez erros reais, e o que cada um ensinou |
+| [**Dificuldades encontradas**](#dificuldades-encontradas) | os treze erros reais, e o que cada um ensinou |
 | [**Ressalvas e limites**](#ressalvas-e-limites) | onde este projeto não serve |
 
 Demais seções: [Testes e CI](#testes-e-ci) · [Como rodar](#como-rodar) ·
@@ -83,6 +83,7 @@ Lendo esta tabela de cima a baixo você tem o projeto inteiro em resumo:
 | **6** | o `print` mostra o número e o esquece | cada treino vira run, com linhagem `data_md5` + `git_commit` | `model.py`, `experiments.py`, `lineage.py` |
 | **7** | "qual era mesmo o run bom?" | promoção a `@champion` com portão de métrica e rollback por alias | `registry.py` |
 | **+** | o modelo continua preso no repositório | **ajuste fino**, **API** FastAPI, **front** v1 e v2, deploy público | `tuning.py`, `api.py`, `app/` |
+| **+** | o dado é um arquivo na máquina de quem roda | **o dataset em Postgres** e a pilha de dois containers **em AWS EC2** | `db.py`, `compose.ec2.yml` |
 
 A última linha é o que o enunciado pediu além do curso: melhorar o modelo
 (ajuste fino), montar a API, montar o front em duas versões e pôr tudo em
@@ -102,6 +103,9 @@ repositório — a coluna da direita diz o que ela garante:
          ▼
   churn.csv  ·  7.043 clientes, 33% de churn
          │
+         │  no deploy em EC2 o CSV é carregado numa tabela do Postgres e o
+         │  pipeline lê de lá. Mesmas linhas, mesma ordem, mesmo modelo — a
+         │  carga valida pelo contrato antes de qualquer INSERT.
          ▼
   contrato pandera  ──── reprova ────▶  artifacts/quarentena/<timestamp>/
   21 colunas · faixas · categorias           o lote e o relatório das
@@ -482,6 +486,49 @@ modelo: trocar de campeão é mover um alias, sem tocar numa linha do front.
 mesma informação e nenhum dos dois deveria aprender a ler `Check.statistics` por
 dentro; ele traduz o schema em `permitidos` / `minimo`-`maximo` / `inteiro`.
 
+### O dado em Postgres, e o deploy em EC2
+
+O arranjo pedido para a AWS: **dois containers numa instância EC2** — um com a
+aplicação, outro com o banco — e o dataset deixando de ser arquivo para virar
+tabela.
+
+```
+  ┌─ instância EC2 ─────────────────────────────────────────────┐
+  │   ┌─ web ───────────────┐          ┌─ postgres ──────────┐  │
+  │   │  Streamlit  :8501   │ ───────▶ │                     │  │
+  │   │  FastAPI    :8000   │ ◀─────── │   tabela clientes   │  │
+  │   │  o CSV, só na carga │ ──carga─▶│   7.043 linhas      │  │
+  │   └─────────────────────┘          └─────────────────────┘  │
+  │          ▲                           sem porta publicada    │
+  └──────────┼──────────────────────────────────────────────────┘
+             │ :8501  →  o navegador
+```
+
+O passo a passo completo está em [`docs/deploy-ec2.md`](docs/deploy-ec2.md).
+Aqui ficam as três decisões.
+
+**O contrato roda antes do INSERT.** `churn.db.semear` valida o CSV pelo pandera
+e só então grava; se reprovar, nada entra e a exceção sobe. Um banco sem
+contrato não elimina dado ruim — só troca o lugar onde ele se esconde. E, do
+outro lado, `load_clean` segue validando o que saiu do banco, exatamente como
+validava o que saía do arquivo. Muda o transporte, não a verificação: é a mesma
+régua que já valia quando o CSV passou a ser buscado por HTTP no deploy de
+vitrine.
+
+**Uma variável troca a origem, e nada mais.** Com `CHURN_DATABASE_URL` definida
+o pipeline lê do Postgres; sem ela, do CSV. `churn.data.carregar_origem` é o
+único lugar que sabe da diferença — o resto do pipeline não sabe nem precisa
+saber de onde o DataFrame veio. O CI prova que são intercambiáveis comparando os
+dois DataFrames inteiros com `assert_frame_equal`, e depois comparando os dois
+**modelos**: mesmas métricas até a 12ª casa, mesmas importâncias com tolerância
+zero.
+
+**O front continua sem carregar modelo.** Na imagem de produção
+(`Dockerfile.web`) ele e a API vão no mesmo container, mas o front segue falando
+HTTP com `127.0.0.1:8000`, e a API segue resolvendo `models:/churn@champion`. A
+fronteira que o projeto defende não é a de processos, é a de responsabilidades:
+trocar de campeão continua sendo mover um alias.
+
 ---
 
 ## Dificuldades encontradas
@@ -610,7 +657,30 @@ editável, o pacote vem de `src/`), e os dois arquivos do front inserem `src/` n
 `sys.path` antes de importar. O repositório é a fonte; a cópia é um artefato do
 deploy.
 
-### 12. Atrito de ferramenta, que também custa tempo
+### 12. O banco devolvia as mesmas linhas noutra ordem
+
+Ao levar o dataset para o Postgres, ler do banco e ler o CSV davam o mesmo
+conjunto de linhas — e `assert_frame_equal` reprovava mesmo assim. A diferença
+era a **ordem**: um `SELECT` sem `ORDER BY` não tem ordem garantida. O Postgres
+devolve na ordem que for mais barata, e ela muda com `VACUUM`, com `UPDATE` e
+com o plano escolhido.
+
+Parece detalhe de banco; não é. O `train_test_split` escolhe linhas por
+**posição**. Com a mesma semente e outra ordem de linhas, o split é outro — e
+com ele o modelo e as métricas. Trocar o CSV pelo banco teria mudado o modelo
+caladamente, e o "mesma semente, mesmo split, mesmos números" que este README
+afirma deixaria de valer, sem nenhum erro aparecendo.
+
+A correção é gravar a posição original como coluna (`linha`) e ler sempre com
+`ORDER BY`. Ela sai do DataFrame antes de voltar: serve ao banco, não ao
+modelo — se vazasse, o índice da linha no CSV viraria feature.
+
+O teste de regressão não se contenta em ler duas vezes. Ele dá um `UPDATE` que
+não altera valor nenhum, só força o Postgres a regravar a linha no fim do heap,
+e então exige que a ordem continue a do CSV. Sem o `ORDER BY` ele falha de
+verdade — conferi removendo a cláusula.
+
+### 13. Atrito de ferramenta, que também custa tempo
 
 - **PowerShell não roda `.sh`**, e uma janela nova abre na pasta pessoal: três
   rodadas de `not a git repository` antes de a causa ficar clara. Resolvido por
@@ -684,19 +754,26 @@ Onde este projeto **não** serve, dito antes que alguém descubra sozinho.
   7 existe para dar. Serve para a vitrine pública; não serve como deploy.
 - **O portão de promoção (0,80) é um piso de sanidade, não uma meta.** Ele barra
   um modelo quebrado, não um modelo medíocre.
-- **Não houve deploy em AWS/EC2**, como o plano previa. A AWS é nuvem paga — as
-  instâncias do *free tier* têm 1 GB de RAM, e a imagem do front instala 105
-  pacotes. O `compose.yml` roda em qualquer VM Linux, EC2 inclusive; o bloqueio
-  que existia (o remote do DVC ser pasta local) foi corrigido, e hoje o dataset é
-  buscado por HTTP com o md5 conferido. A escolha foi publicar no Streamlit
-  Community Cloud, que é gratuito.
+- **O deploy em EC2 não tem HTTPS nem autenticação.** O tráfego vai em claro e
+  quem tiver o IP usa o front e a API. Para um trabalho de curso sobre dado
+  público é aceitável; qualquer outro uso precisaria de um proxy com
+  certificado e de um domínio. As demais ressalvas do servidor estão em
+  [`docs/deploy-ec2.md`](docs/deploy-ec2.md).
+- **Uma instância, sem redundância, e sem backup do banco.** O volume sobrevive
+  a `down` e a reboot, não à destruição da instância. Aqui passa porque o
+  dataset é recarregável do CSV com o md5 conferido; com dado que não se
+  recupera, faltaria `pg_dump` agendado.
+- **O Postgres guarda o dataset, não o histórico.** Não há versionamento dentro
+  do banco: quem versiona o dado continua sendo o ponteiro `.dvc`, e a carga
+  confere o md5 contra ele. Um banco com `UPDATE` em produção precisaria de
+  outra resposta para "qual dado gerou este modelo".
 
 ---
 
 ## Testes e CI
 
 ```bash
-uv run pytest          # 126 testes
+uv run pytest          # 136 testes
 ```
 
 Os testes não cobrem "o modelo acerta" — cobrem as **juntas** onde as coisas
@@ -767,7 +844,7 @@ uv run python -m churn.experiments    # o grid do Encontro 6: 9 runs
 uv run python scripts/relatorio.py --html   # os runs sem navegador nem servidor
 uv run python scripts/prever.py --n 10      # prever em lote, pela linha de comando
 uv run python scripts/conferir_api.py       # a API está servindo mesmo?
-uv run pytest                         # 126 testes
+uv run pytest                         # 136 testes
 ```
 
 Os testes **não precisam do dataset** — usam amostras de `tests/conftest.py`.
@@ -845,6 +922,39 @@ front treina o modelo na própria sessão e **diz isso na barra lateral**: "Modo
 demonstração". Um número que sai de um modelo treinado na hora não é o mesmo que
 sai do campeão promovido, e quem olha tem o direito de saber qual é qual.
 
+### Em AWS EC2, com o dado em Postgres
+
+O arranjo de dois containers — aplicação e banco — na mesma instância:
+
+```bash
+# na instância, depois de instalar o Docker e clonar o repositório
+printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+docker compose -f compose.ec2.yml up -d --build
+```
+
+| serviço | porta | o que é |
+|---|---|---|
+| `web` | 8501 | Streamlit + FastAPI no mesmo container |
+| `postgres` | — | o dataset em tabela; **sem porta publicada** |
+
+A aplicação faz a sequência de partida sozinha: materializa o CSV, carrega as
+7.043 linhas no banco validando pelo contrato, treina e promove um campeão se
+não houver, sobe a API, espera ela responder **com modelo carregado** e só então
+abre o front.
+
+O passo a passo — tipo de instância, grupo de segurança, swap, custos e como
+desligar para não pagar à toa — está em
+[`docs/deploy-ec2.md`](docs/deploy-ec2.md).
+
+Para exercitar o mesmo caminho na sua máquina, sem AWS:
+
+```bash
+docker compose up -d postgres
+export CHURN_DATABASE_URL=postgresql+psycopg://churn:churn@localhost:5432/churn
+uv run --group db python -m churn.db      # carrega o CSV no banco
+uv run --group db python -m churn.tuning  # treina lendo do banco
+```
+
 ### E o Hugging Face Spaces?
 
 A imagem existe em `deploy/spaces/` e é construída e testada pelo CI a cada
@@ -875,20 +985,24 @@ prj_churn/
 │  ├─ serving.py     # ChurnPipeline — o modelo que aceita cliente cru
 │  ├─ registry.py    # promove o vencedor a @champion
 │  ├─ api.py         # FastAPI — o campeão atrás de HTTP
+│  ├─ db.py         # o dataset em Postgres — carga validada e leitura ordenada
 │  └─ demonstracao.py # o modo vitrine: sem API, sem Registry, sem CSV no disco
 ├─ app/              # Streamlit: Inicio.py (v1) + pages/ (v2)
 ├─ requirements.txt  # para plataformas que instalam por pip (Streamlit Cloud)
-├─ tests/            # 126 testes
+├─ tests/            # 136 testes
 ├─ scripts/          # preparar · relatorio · fetch_data · mlflow_ui · prever
 │                    # profiling · gerar_v2 · alternar_versao · quebra_proposital
 │                    # conferir_run · conferir_api · subir_front
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
 ├─ deploy/spaces/    # Dockerfile + README do Hugging Face Spaces
-├─ docs/             # rodar-local.md · data-pipeline.md · deploy-huggingface.md
+├─ docs/             # rodar-local.md · data-pipeline.md · deploy-ec2.md
+│                    # deploy-huggingface.md
 ├─ *.bat             # Windows: subir-front · ver-runs · abrir-mlflow · atualizar
 ├─ Dockerfile        # treino        Dockerfile.dados  # dvc pull no deploy
 ├─ Dockerfile.api    # a API         Dockerfile.app    # o front
-├─ compose.yml       # dados · tuning · promover · api · app · mlflow
+├─ compose.yml       # dev: dados · tuning · promover · api · app · mlflow · postgres
+├─ compose.ec2.yml   # produção: dois containers — web (front+API) e postgres
+├─ Dockerfile.web    # a imagem da aplicação para o EC2
 ├─ dvc.yaml          # o pipeline: deps (dado + código) → outs (modelo)
 └─ pyproject.toml    # deps travadas (uv), em grupos por imagem
 ```

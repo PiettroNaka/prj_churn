@@ -227,3 +227,176 @@ jobs:
         with:
           name: churn-model
           path: artifacts/churn_model.pkl
+
+  # O entregável do deploy em EC2: o dado em Postgres e a pilha de dois
+  # containers do desenho. Job à parte do `build` porque os testes de banco
+  # precisam de um Postgres de verdade, e a imagem de treino não carrega o
+  # driver — cada imagem instala só o seu grupo.
+  banco:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: churn
+          POSTGRES_PASSWORD: churn
+          POSTGRES_DB: churn
+        ports:
+          - 5432:5432
+        # sem o healthcheck o job começa antes de o banco aceitar conexão
+        options: >-
+          --health-cmd "pg_isready -U churn -d churn"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # uv pelo PyPI: sem depender da versão de uma action do marketplace.
+      - name: Instala o uv
+        run: pipx install uv
+
+      - name: Ambiente travado, com o grupo do banco
+        run: uv sync --frozen --group db --group dev
+
+      # Estes testes PULAM sem a variável. Defini-la aqui é o que os faz rodar
+      # de verdade — um teste de banco que pula em silêncio não prova nada, e
+      # por isso o passo começa exigindo que o serviço esteja mesmo de pé.
+      - name: Testes do banco, contra um Postgres de verdade
+        env:
+          CHURN_TEST_DATABASE_URL: postgresql+psycopg://churn:churn@localhost:5432/churn
+        run: |
+          uv run --frozen --group db python -c "
+          import os, sqlalchemy as sa
+          sa.create_engine(os.environ['CHURN_TEST_DATABASE_URL']).connect().close()
+          print('o Postgres do CI respondeu')
+          "
+          # -rs imprime o motivo de qualquer skip. Com a conexão acima provada,
+          # um skip aqui só poderia vir da variável não chegar ao pytest — e
+          # apareceria no relatório em vez de passar por verde.
+          uv run --frozen --group db --group dev pytest tests/test_db.py -v -rs
+
+      - name: Materializa o dataset
+        run: uv run --frozen --group data python scripts/preparar.py --so-dado
+
+      # A prova que interessa: o dataset inteiro entra no banco passando pelo
+      # contrato, e ler de lá dá exatamente o mesmo DataFrame que ler o CSV.
+      - name: O dataset inteiro, pelo banco e pelo arquivo
+        env:
+          CHURN_DATABASE_URL: postgresql+psycopg://churn:churn@localhost:5432/churn
+        run: |
+          uv run --frozen --group db python -m churn.db
+          uv run --frozen --group db python - <<'PY'
+          import os
+          import pandas as pd
+          from churn.data import load_clean
+          from churn.db import contar, ler, motor
+
+          url = os.environ["CHURN_DATABASE_URL"]
+          maquina = motor(url)
+          print(f"linhas no banco: {contar(maquina)}")
+
+          pd.testing.assert_frame_equal(pd.read_csv("data/churn.csv"), ler(maquina))
+          print("ok   ler do banco == ler o CSV (colunas, tipos e ordem das linhas)")
+
+          pd.testing.assert_frame_equal(
+              load_clean("data/churn.csv", "customerID", "Churn", None, None),
+              load_clean("data/churn.csv", "customerID", "Churn", None, url),
+          )
+          print("ok   o pipeline dá o mesmo resultado pelas duas origens")
+          PY
+
+      # E o modelo: treinar pelo banco tem de dar o MESMO modelo que pelo CSV.
+      # Se a ordem das linhas escorregar, isto pega — é o que o ORDER BY protege.
+      - name: Treinar pelo banco dá o mesmo modelo que pelo CSV
+        env:
+          CHURN_DATABASE_URL: postgresql+psycopg://churn:churn@localhost:5432/churn
+        run: |
+          uv run --frozen --group db python - <<'PY'
+          import os
+          import numpy as np
+          from churn.config import settings
+          from churn.model import ajustar
+
+          url = os.environ["CHURN_DATABASE_URL"]
+          m_arq, _, met_arq = ajustar(settings.model_copy(update={"database_url": None}))
+          m_bd, _, met_bd = ajustar(settings.model_copy(update={"database_url": url}))
+
+          for chave in sorted(met_arq):
+              iguais = abs(met_arq[chave] - met_bd[chave]) < 1e-12
+              print(f"  {chave:<10} {met_arq[chave]:.6f}  {met_bd[chave]:.6f}  "
+                    f"{'ok' if iguais else 'DIFERENTE'}")
+              assert iguais, f"{chave} mudou ao trocar a origem do dado"
+
+          assert list(m_arq.feature_names_in_) == list(m_bd.feature_names_in_)
+          assert np.array_equal(m_arq.feature_importances_, m_bd.feature_importances_)
+          print("ok   modelo idêntico pelas duas origens")
+          PY
+
+  # A pilha do desenho, de ponta a ponta: dois containers numa máquina só.
+  ec2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Sobe os dois containers
+        env:
+          POSTGRES_PASSWORD: senha-de-ci-nao-reaproveitar
+        run: docker compose -f compose.ec2.yml up -d --build
+
+      - name: Espera a aplicação ficar saudável (com modelo carregado)
+        env:
+          POSTGRES_PASSWORD: senha-de-ci-nao-reaproveitar
+        run: |
+          for _ in $(seq 1 60); do
+            estado=$(docker inspect --format '{{.State.Health.Status}}' \
+              "$(docker compose -f compose.ec2.yml ps -q web)" 2>/dev/null || echo partindo)
+            [ "$estado" = "healthy" ] && echo "web saudável" && exit 0
+            [ "$estado" = "unhealthy" ] && break
+            sleep 10
+          done
+          echo "--- a aplicação não ficou saudável; log ---"
+          docker compose -f compose.ec2.yml logs web
+          exit 1
+
+      - name: São dois containers, e o banco tem o dataset
+        env:
+          POSTGRES_PASSWORD: senha-de-ci-nao-reaproveitar
+        run: |
+          docker compose -f compose.ec2.yml ps
+          linhas=$(docker compose -f compose.ec2.yml exec -T postgres \
+            psql -U churn -d churn -tAc "SELECT count(*) FROM clientes")
+          echo "linhas na tabela clientes: $linhas"
+          [ "$linhas" = "7043" ] || { echo "esperava 7043 linhas no banco"; exit 1; }
+
+      - name: O front responde, e a API serve o campeão promovido
+        env:
+          POSTGRES_PASSWORD: senha-de-ci-nao-reaproveitar
+        run: |
+          curl -fsS http://localhost:8501/_stcore/health >/dev/null && echo "ok   front no ar"
+          docker compose -f compose.ec2.yml exec -T web \
+            /app/.venv/bin/python - <<'PY'
+          import json, urllib.request
+          modelo = json.load(urllib.request.urlopen("http://127.0.0.1:8000/modelo"))
+          print("ok   /modelo:", modelo)
+          assert "champion" in json.dumps(modelo), "a API não aponta para o alias"
+          PY
+
+      - name: O banco não está exposto para fora do compose
+        env:
+          POSTGRES_PASSWORD: senha-de-ci-nao-reaproveitar
+        run: |
+          if docker compose -f compose.ec2.yml port postgres 5432 2>/dev/null; then
+            echo "o Postgres publicou uma porta no host — não deveria"; exit 1
+          fi
+          echo "ok   o Postgres só existe na rede interna"
+
+      - name: Derruba a pilha
+        if: always()
+        env:
+          POSTGRES_PASSWORD: senha-de-ci-nao-reaproveitar
+        run: docker compose -f compose.ec2.yml down -v

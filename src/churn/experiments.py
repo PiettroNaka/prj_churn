@@ -48,7 +48,9 @@ def dados_codificados(cfg: Settings):
     montasse o seu, a comparação entre elas deixaria de significar alguma coisa.
     """
     frame = add_derived_features(
-        load_clean(cfg.data_path, cfg.id_column, cfg.target, cfg.quarantine_dir)
+        load_clean(
+            cfg.data_path, cfg.id_column, cfg.target, cfg.quarantine_dir, cfg.database_url
+        )
     )
     features, labels = split_features_target(frame, cfg.target, cfg.positive_label)
     x_train, x_test, y_train, y_test = train_test_split(

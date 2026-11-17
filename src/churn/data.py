@@ -30,6 +30,26 @@ def load_raw(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def carregar_origem(data_path: Path, database_url: str | None) -> pd.DataFrame:
+    """Lê o dado cru da origem configurada: do banco quando há URL, do arquivo
+    quando não.
+
+    O resto do pipeline não sabe de qual das duas veio, e é esse o ponto. O
+    contrato roda igual nos dois casos; o que muda é só de onde os bytes saem —
+    a mesma régua que já valia quando o CSV passou a ser buscado por HTTP no
+    deploy de vitrine.
+
+    O import do :mod:`churn.db` é tardio de propósito: o driver do Postgres vive
+    num grupo opcional de dependências, e a imagem de treino que lê de arquivo
+    não deve quebrar por não tê-lo instalado.
+    """
+    if database_url:
+        from churn.db import ler, motor
+
+        return ler(motor(database_url))
+    return load_raw(data_path)
+
+
 def validate(df: pd.DataFrame, target: str) -> pd.DataFrame:
     """Valida o dado cru contra o ``ChurnRawSchema``. Levanta ValueError.
 
@@ -88,15 +108,20 @@ def load_clean(
     id_column: str,
     target: str,
     quarantine_dir: Path | None = None,
+    database_url: str | None = None,
 ) -> pd.DataFrame:
     """Pipeline de dados: carrega -> valida cru -> remove id -> coage -> valida limpo.
+
+    ``database_url`` troca a origem: com ela o dado vem do Postgres, sem ela do
+    CSV. Tudo o que vem depois é idêntico — a validação, a limpeza e a segunda
+    validação não sabem nem precisam saber de onde o DataFrame saiu.
 
     ``quarantine_dir`` liga a quarentena do Encontro 4: reprovando, o lote é
     gravado lá antes de a exceção subir. ``None`` desliga, e é o padrão — quem
     escolhe onde o lote ruim mora é quem orquestra (``model.train`` passa
     ``cfg.quarantine_dir``), não esta função.
     """
-    df = load_raw(data_path)
+    df = carregar_origem(data_path, database_url)
     df = _com_quarentena(df, lambda frame: validate(frame, target), quarantine_dir)
     df = drop_identifier(df, id_column)
     df = coerce_total_charges(df)

@@ -84,7 +84,9 @@ def ajustar(
     sobre categóricas já codificadas, e a inferência precisa da mesma codificação.
     """
     frame = add_derived_features(
-        load_clean(cfg.data_path, cfg.id_column, cfg.target, cfg.quarantine_dir)
+        load_clean(
+            cfg.data_path, cfg.id_column, cfg.target, cfg.quarantine_dir, cfg.database_url
+        )
     )
     features, labels = split_features_target(frame, cfg.target, cfg.positive_label)
 
