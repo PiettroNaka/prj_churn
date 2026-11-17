@@ -28,6 +28,50 @@ publicada, então nem o grupo de segurança precisa protegê-lo.
 
 ---
 
+## O caminho curto: deixar a instância fazer tudo sozinha
+
+Há dois caminhos. Este é o recomendado — você não precisa entrar por SSH para
+nada.
+
+A AWS tem um campo **User data** na tela de criar a instância; o que estiver
+nele roda como root no primeiro boot. O arquivo
+[`deploy/ec2/user-data.sh`](../deploy/ec2/user-data.sh) faz a sequência inteira:
+espera o `apt` liberar, instala o Docker, cria swap **se** a instância tiver
+pouca memória, clona o repositório, gera a senha do banco e sobe os dois
+containers — conferindo no fim que a aplicação ficou saudável e que as 7.043
+linhas entraram na tabela.
+
+1. **Launch instance** → Ubuntu Server 24.04 LTS, `t3.small` (ou `t3.micro` do
+   free tier), disco **20 GB**.
+2. Grupo de segurança: libere a **8501** para `0.0.0.0/0` e o **22** só para o
+   seu IP (detalhes no passo 2 abaixo).
+3. **Advanced details** → role até **User data** → cole o conteúdo de
+   `deploy/ec2/user-data.sh`.
+4. **Launch**. Espere de 8 a 20 minutos conforme a instância.
+5. Abra **`http://<IP-PÚBLICO>:8501`**.
+
+Para acompanhar, se quiser (não é necessário):
+
+```bash
+ssh -i sua-chave.pem ubuntu@<IP>
+cat /var/log/churn-estado        # em que passo está; a última linha é a atual
+sudo tail -f /var/log/churn-deploy.log
+```
+
+O estado termina em `PRONTO` quando deu certo, ou numa linha começando com
+`FALHOU:` dizendo o quê. Se falhar, o resto do caminho longo abaixo serve para
+consertar à mão.
+
+> O script não tem segredo nenhum dentro dele: a senha do banco é **gerada na
+> instância** e fica só lá, em `/opt/prj_churn/.env` com permissão 600.
+
+---
+
+## O caminho longo: passo a passo manual
+
+Use este se o User data falhar, ou se quiser ver cada peça entrando no lugar.
+
+
 ## 1. Escolher a instância
 
 | Tipo | RAM | Serve? |
