@@ -942,9 +942,12 @@ A aplicação faz a sequência de partida sozinha: materializa o CSV, carrega as
 não houver, sobe a API, espera ela responder **com modelo carregado** e só então
 abre o front.
 
-O passo a passo — tipo de instância, grupo de segurança, swap, custos e como
-desligar para não pagar à toa — está em
-[`docs/deploy-ec2.md`](docs/deploy-ec2.md).
+Não é preciso digitar nada disso na instância: o campo **User data** da tela de
+criar a EC2 aceita [`deploy/ec2/user-data.sh`](deploy/ec2/user-data.sh), que
+roda como root no primeiro boot e faz a sequência inteira — Docker, swap se a
+memória for curta, clone, senha gerada na hora e os dois containers de pé. O
+passo a passo (tipo de instância, grupo de segurança, custos e como desligar
+para não pagar à toa) está em [`docs/deploy-ec2.md`](docs/deploy-ec2.md).
 
 Para exercitar o mesmo caminho na sua máquina, sem AWS:
 
@@ -994,6 +997,7 @@ prj_churn/
 │                    # profiling · gerar_v2 · alternar_versao · quebra_proposital
 │                    # conferir_run · conferir_api · subir_front
 ├─ data/             # churn.csv.dvc (ponteiro) — os bytes vêm do DVC
+├─ deploy/ec2/       # user-data.sh — a EC2 sobe o projeto sozinha no 1º boot
 ├─ deploy/spaces/    # Dockerfile + README do Hugging Face Spaces
 ├─ docs/             # rodar-local.md · data-pipeline.md · deploy-ec2.md
 │                    # deploy-huggingface.md
